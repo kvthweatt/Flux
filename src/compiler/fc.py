@@ -17,6 +17,7 @@ from fast import *
 from fcodegen import visitor as _codegen_visitor
 from flogger import FluxLogger, FluxLoggerConfig, LogLevel
 from fconfig import *
+from fmacros import build_compiler_macros
 
 # Resolve compiler root: prefer FLUXC_SRCDIR env var, fall back to script location
 FLUXC_SRCDIR = Path(os.environ.get("FLUXC_SRCDIR", Path(__file__).parent)).resolve()
@@ -257,95 +258,10 @@ class FluxCompiler:
         extra_libs = extra_libs or []
         try:
             self.logger.section(f"Preprocessing Flux file: {filename}", LogLevel.INFO)
-            self.predefined_macros = {
-                # Compiler identification
-                '__FLUX__': '1',
-                '__FLUX_MAJOR__': '1',
-                '__FLUX_MINOR__': '0',
-                '__FLUX_PATCH__': '0',
-                '__FLUX_VERSION__': '1',
-                
-                # LLVM backend info
-                # Remove when we're no longer using LLVM
-                '__LLVM__': '1',
-                
-                # Architecture detection
-                '__ARCH_X86__': '0',
-                '__ARCH_X86_64__': '0',
-                '__ARCH_ARM__': '0',
-                '__ARCH_ARM64__': '0',
-                '__ARCH_RISCV__': '0',
-                
-                # Platform detection
-                '__WINDOWS__': '0',
-                '__LINUX__': '0',
-                '__MACOS__': '0',
-                '__POSIX__': '0',
-                
-                # Feature detection
-                '__LITTLE_ENDIAN__': '0',  # Switch if desired.
-                '__BIG_ENDIAN__': '1',     # Always big-endian.
-                '__SIZEOF_PTR__': '8',     # Assume 64-bit.
-                '__SIZEOF_INT__': '4',     # Always 32-bit
-                '__SIZEOF_LONG__': '8',    # Always 64-bit
-                '__BYTE_WIDTH__': str(get_byte_width(config)),
-                
-                # Compilation mode
-                '__DEBUG__': '1' if config.get('debug', False) else '0',
-                '__RELEASE__': '0' if config.get('debug', True) else '1',
-                '__OPTIMIZE__': config.get('optimization_level', '0'),
-            }
-            
-            # Set platform-specific values
-            if self.platform == "Windows":
-                self.predefined_macros.update({
-                    '__WINDOWS__': '1',
-                    '__WIN32__': '1',
-                    '__WIN64__': '1' if 'x86_64' in self.module_triple else '0',
-                })
-            elif self.platform == "Darwin":  # macOS
-                self.predefined_macros.update({
-                    '__MACOS__': '1',
-                    '__APPLE__': '1',
-                    '__MACH__': '1',
-                    '__POSIX__': '1',
-                })
-            elif self.cfg_platform == "DOS":
-                self.predefined_macros.update({
-                    '__DOS__': '1',
-                    '__MSDOS__': '1',
-                    '__16BIT__': '1',
-                    '__I86__': '1',
-                    '__TINY__': '1' if config.get('dos_target') == 'com' else '0',
-                    '__SMALL__': '1' if config.get('dos_model') == 'small' else '0',
-                })
-            else:  # Linux/Unix
-                self.predefined_macros.update({
-                    '__LINUX__': '1',
-                    '__UNIX__': '1',
-                    '__POSIX__': '1',
-                    '__gnu_linux__': '1',
-                })
-            
-            # Set architecture
-            if 'x86_64' in self.module_triple or 'amd64' in self.module_triple:
-                self.predefined_macros.update({
-                    '__ARCH_X86_64__': '1',
-                    '__x86_64__': '1',
-                    '__amd64__': '1',
-                })
-            elif 'i386' in self.module_triple or 'i686' in self.module_triple:
-                self.predefined_macros.update({
-                    '__ARCH_X86__': '1',
-                    '__i386__': '1',
-                    '__i686__': '1',
-                })
-            elif 'arm64' in self.module_triple or 'aarch64' in self.module_triple:
-                self.predefined_macros.update({
-                    '__ARCH_ARM64__': '1',
-                    '__arm64__': '1',
-                    '__aarch64__': '1',
-                })
+            self.predefined_macros = build_compiler_macros(
+                module_triple=self.module_triple,
+                cfg_platform=self.cfg_platform,
+            )
             print("[COMPILER] Pre-defined / built in macros:\n")
             for key, value in self.predefined_macros.items():
                 print("[COMPILER]", key, value)

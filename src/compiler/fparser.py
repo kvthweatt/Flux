@@ -128,22 +128,28 @@ class ParseError(Exception):
 
     def __init__(self, message: str, token: Optional[Token] = None,
                  source_lines: Optional[List[str]] = None,
-                 expected_type=None, prev_token: Optional[Token] = None):
+                 expected_type=None, prev_token: Optional[Token] = None,
+                 line_map=None):
         self.message = message
         self.token = token
         self.source_lines = source_lines
         self.expected_type = expected_type  # TokenType or None
         self.prev_token = prev_token
+        self.line_map = line_map or []
         super().__init__(self._format())
 
     def _format(self) -> str:
         if self.token is None:
+            self.display_line = None
+            self.display_col  = None
             return self.message
 
         line_no = self.token.line
         col    = self.token.column  # 1-based
 
         if not self.source_lines:
+            self.display_line = line_no
+            self.display_col  = col
             return f"{self.message} at {line_no}:{col}"
 
         # For tokens like ';' that should appear at the end of the previous
@@ -161,7 +167,12 @@ class ParseError(Exception):
             show_col = len(prev_src) + 1  # one past the last real character
 
         # Header now uses the resolved show_line_no/show_col, not the raw token position
-        header = f"{self.message} at {show_line_no}:{show_col}"
+        display_line_no = self.line_map[show_line_no - 1][1] if self.line_map and 1 <= show_line_no <= len(self.line_map) else show_line_no
+        # Store the fully-resolved coordinates so callers (e.g. the LSP server)
+        # can use them directly without re-parsing the formatted message string.
+        self.display_line = display_line_no
+        self.display_col  = show_col
+        header = f"{self.message} at {display_line_no}:{show_col}"
 
         if not (1 <= show_line_no <= len(self.source_lines)):
             return header
@@ -217,7 +228,7 @@ class ParseError(Exception):
         return f"{header}\n{src_line}\n{caret_line}"
 
 class FluxParser:
-    def __init__(self, tokens: List[Token], default_byte_width: int = None, source_lines: Optional[List[str]] = None):
+    def __init__(self, tokens: List[Token], default_byte_width: int = 8, source_lines: Optional[List[str]] = None):
         self.tokens = tokens
         self.position = 0
         self.current_token = self.tokens[0] if tokens else None
@@ -302,7 +313,7 @@ class FluxParser:
     
     def error(self, message: str, expected_type=None, prev_token=None) -> None:
         """Raise a parse error with current token context"""
-        raise ParseError(message, self.current_token, self._source_lines, expected_type, prev_token)
+        raise ParseError(message, self.current_token, self._source_lines, expected_type, prev_token, self._line_map)
 
     def warn(self, message: str) -> None:
         """Emit a non-fatal compiler warning to stderr with source location context."""
@@ -665,7 +676,7 @@ class FluxParser:
                     statements.append(stmt)
             except ParseError as e:
                 error_msg = f"\nParse error: {e}"
-                raise ValueError(error_msg)
+                raise ValueError(error_msg) from e
         # Prepend template instantiations so they are emitted before any call site
         if self._template_struct_instances:
             statements = self._template_struct_instances + statements
@@ -5535,6 +5546,7 @@ def main():
         
         # Parse
         parser = FluxParser(tokens, source_lines=result.splitlines(keepends=True))
+        parser._line_map = preprocessor.line_map
         ast = parser.parse()
         
         if show_ast:

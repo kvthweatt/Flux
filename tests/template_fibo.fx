@@ -1,6 +1,4 @@
-#import "redstandard.fx";
-#import "redformat.fx";
-#import "redmath.fx";
+#import "standard.fx", "math.fx", "format.fx";
 
 using standard::io::console,
       standard::format;
@@ -11,17 +9,20 @@ def fibonacci<T>(T n) -> T
     {
         return n;
     };
+
+    def ();
     
-    T a = (T)0;
-    T b = (T)1;
-    T i = (T)2;
+    T a = (T)0,
+      b = (T)1,
+      c = (T)2,
+      temp;
     
-    while (i <= n)
+    while (c <= n)
     {
-        T temp = a + b;
+        temp = a + b;
         a = b;
         b = temp;
-        i = i + (T)1;
+        c = c + (T)1;
     };
     
     return b;
@@ -38,7 +39,7 @@ def main() -> int
         print_cyan("fib(\0");
         print(i);
         print_cyan(") = \0");
-        x = fibonacci<u64>(i);
+        x = fibonacci(i);
         print(x);
         print("\n\0");
     };
