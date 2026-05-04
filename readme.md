@@ -22,14 +22,14 @@ It has a fundamentally different type system while still being C ABI compatible.
 **Characteristics:**
 - Unique type system with endianness and alignment baked into types
 - Manual memory management
-- Compiler that does not fight you
-- First class data control features
+- Compiler that stays out of your way
+- First class data manipulation features
 - Consistent grammar and syntax constructs throughout
-- Rich operator set with distinct bitwise set
+- Rich operator collection with distinct bitwise set
 - Everything stack allocated unless otherwise specified
-- Everything is zero initialized unless otherwise specified
+- Everything is zero initialized on declaration unless otherwise specified
 - Custom infix operator support
-- Templates without SFINAE or noise
+- Templates without SFINAE or noise at call sites
 - Opt-in ownership without a borrow checker
 - Designed so you don't need to repeat yourself so much when coding
 
@@ -57,18 +57,18 @@ Flux is well-suited for:
 Flux is in active development. The syntax and grammar will not change. The [standard library](https://github.com/kvthweatt/FluxLang/tree/main/src/stdlib) is the current focus.
 
 **What exists:**
-- [Complete language specification](https://github.com/kvthweatt/FluxLang/blob/main/docs/Specs/language_specification.md)
+- [Language Specification](https://github.com/kvthweatt/FluxLang/blob/main/docs/Specs/language_specification.md)
 - [Keyword Reference](https://github.com/kvthweatt/FluxLang/blob/main/docs/keyword_reference.md)
-- A Flux [style guide](https://github.com/kvthweatt/FluxLang/blob/main/docs/style_guide.md)
-- Tutorials for [beginner](https://github.com/kvthweatt/FluxLang/blob/main/docs/learn_flux_intro.md) and [adept](https://github.com/kvthweatt/FluxLang/blob/main/docs/learn_flux_adept.md) programmers
+- A Flux [Style Guide](https://github.com/kvthweatt/FluxLang/blob/main/docs/style_guide.md)
+- Tutorials for [Beginner](https://github.com/kvthweatt/FluxLang/blob/main/docs/learn_flux_intro.md) and [Adept](https://github.com/kvthweatt/FluxLang/blob/main/docs/learn_flux_adept.md) Programmers
+- Base compiler ✅
+- An LSP ✅
+- A Package Manager (FPM) ✅
 
 **What's being built:**
-- Compiler Implementation ✅
-- Standard library (In-progress)
-- Build tooling
-- IDE (In-progress)
-- Package manager (In-progress)
-- LSP (In-progress)
+- Standard Library (expanding the existing)
+- Build Tooling
+- IDE
 
 ## Getting Involved
 
