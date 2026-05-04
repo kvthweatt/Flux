@@ -1,0 +1,9 @@
+{
+    "clients": {
+        "flux": {
+            "enabled": true,
+            "command": ["python", "<your_path_to_flux>\\flsp.py"],
+            "selector": "source.flux"
+        }
+    }
+}

@@ -10,8 +10,8 @@ def fibonacci<T>(T n) -> T
         return n;
     };
 
-    def ();
-    
+    int true test;
+
     T a = (T)0,
       b = (T)1,
       c = (T)2,

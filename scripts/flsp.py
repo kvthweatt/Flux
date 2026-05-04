@@ -129,8 +129,15 @@ def _make_range(line: int, col: int, end_col: Optional[int] = None) -> lsp.Range
 def _diag_from_parse_error(exc: "ParseError") -> lsp.Diagnostic:
     line = getattr(exc, 'display_line', None) or 1
     col  = getattr(exc, 'display_col',  None) or 1
+
+    # Compute end column from the token's text length so the entire
+    # token is underlined, not just its first character.
+    token     = getattr(exc, 'token', None)
+    token_len = len(token.value) if token is not None and isinstance(getattr(token, 'value', None), str) else 1
+    end_col   = col + token_len          # end_col is 1-based, exclusive
+
     return lsp.Diagnostic(
-        range    = _make_range(line, col),
+        range    = _make_range(line, col, end_col),
         message  = str(exc),
         severity = lsp.DiagnosticSeverity.Error,
         source   = SERVER_NAME,
