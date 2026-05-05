@@ -10,7 +10,7 @@ def fibonacci<T>(T n) -> T
         return n;
     };
 
-    int true test;
+    int test;
 
     T a = (T)0,
       b = (T)1,
