@@ -2553,13 +2553,13 @@ vectorcall{}* someSIMDfunc() -> u64*;
 # Keyword list:
 ```
 alignof, and, as, asm, assert, auto, break, bool, byte, case,
-catch, cdecl, const, continue, contract, data, def, default,
+catch, cdecl, const, continue, contract, data, def, default, defer,
 deprecate, do, double, elif, else, enum, false, fastcall,
 float, for, global, goto, heap, if, in, is, int, jump, label,
 local, long, namespace, noinit, noreturn, not, object, or,
 private, public, register, return, signed, singinit, sizeof,
 stack, stdcall, struct, switch, this, thiscall, throw, true,
-try, typeof, uint, ulong, union, unsigned, vectorcall, void,
+try, typeof, uint, ulong, union, unsigned, using,  vectorcall, void,
 volatile, while, xor
 ```
 
