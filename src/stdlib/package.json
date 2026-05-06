@@ -7,7 +7,7 @@
   "base_url": "https://raw.githubusercontent.com/kvthweatt/Flux/main/src/stdlib",
   "packages": {
     "flux-bigint": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "bigint.fx",
       "path": "",
       "description": "Arbitrary precision integer arithmetic",
@@ -40,17 +40,17 @@
       "path": "",
       "description": "Cryptographic algorithms",
       "dependencies": {
-        "flux-bigint": ">=1.0.0",
+        "flux-bigint": ">=1.0.1",
         "flux-types": ">=1.0.0"
       }
     },
     "flux-decimal": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "decimal.fx",
       "path": "",
       "description": "Arbitrary precision floating point arithmetic",
       "dependencies": {
-        "flux-bigint": ">=1.0.0"
+        "flux-bigint": ">=1.0.1"
       }
     },
     "flux-detour": {
@@ -181,7 +181,7 @@
         "flux-math": ">=1.0.1",
         "flux-memory": ">=1.0.2",
         "flux-types": ">=1.0.0",
-        "flux-vectors": ">=1.0.0"
+        "flux-vectors": ">=1.0.1"
       }
     },
     "flux-random": {
@@ -204,7 +204,7 @@
         "flux-memory": ">=1.0.2",
         "flux-random": ">=1.0.0",
         "flux-types": ">=1.0.0",
-        "flux-vectors": ">=1.0.0"
+        "flux-vectors": ">=1.0.1"
       }
     },
     "flux-rle": {
@@ -222,7 +222,7 @@
       "path": "",
       "description": "Standard import for any Flux program",
       "dependencies": {
-        "flux-runtime": ">=1.0.1"
+        "flux-runtime": ">=1.0.2"
       }
     },
     "flux-sys": {
@@ -262,11 +262,12 @@
       }
     },
     "flux-vectors": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "vectors.fx",
       "path": "",
       "description": "Vector math (2D, 3D, 4D)",
       "dependencies": {
+        "flux-math": ">=1.0.1",
         "flux-types": ">=1.0.0"
       }
     },
@@ -368,7 +369,7 @@
       }
     },
     "flux-runtime": {
-      "version": "1.0.1",
+      "version": "1.0.2",
       "entry": "runtime.fx",
       "path": "runtime",
       "description": "Flux runtime core",
@@ -380,6 +381,7 @@
         "flux-string": ">=1.0.4",
         "flux-string-utilities": ">=1.0.3",
         "flux-sys": ">=1.0.0",
+        "flux-timing": ">=1.0.2",
         "flux-types": ">=1.0.0"
       }
     },
@@ -403,7 +405,7 @@
       }
     },
     "flux-timing": {
-      "version": "1.0.1",
+      "version": "1.0.2",
       "entry": "timing.fx",
       "path": "runtime",
       "description": "High-resolution timers and sleep",

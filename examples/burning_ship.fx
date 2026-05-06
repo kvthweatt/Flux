@@ -530,7 +530,7 @@ def main() -> int
             };
         };
 
-        if (ref_dirty & !moving) { ref_dirty = false; };
+        if (ref_dirty &!moving) { ref_dirty = false; };
 
         // Pre-convert view bounds to double for the fast path
         x_min_d   = decimal_to_double(@x_min);

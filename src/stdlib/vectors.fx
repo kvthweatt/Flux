@@ -10,6 +10,10 @@
 #import "types.fx";
 #endif;
 
+#ifndef FLUX_STANDARD_MATH
+#import "math.fx";
+#endif;
+
 #ifndef FLUX_STANDARD_VECTORS
 #def FLUX_STANDARD_VECTORS 1;
 

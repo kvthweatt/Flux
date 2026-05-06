@@ -63,6 +63,10 @@ using standard::memory::allocators::stdheap;
 #import "sys.fx";
 #endif;
 
+#ifndef FLUX_STANDARD_TIMING
+#import "timing.fx";
+#endif;
+
 #ifndef FLUX_STANDARD_IO
 #import "io.fx";
 #endif;
