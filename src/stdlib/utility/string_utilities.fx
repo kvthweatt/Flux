@@ -19,8 +19,9 @@ namespace standard
                 strcat(byte* dest, byte* src) -> byte*,
                 strncat(byte* dest, byte* src, size_t n) -> byte*,
                 strncmp(byte* s1, byte* s2, size_t n) -> int,
-                strchr(byte* str, int ch) -> byte*;
-                //strstr(byte*, byte*) -> byte*;
+                strtok(byte* str, byte* delim) -> byte*,
+                strtok_s(byte* str, byte* delim, byte** saveptr) -> byte*,
+                _strdup(byte* str) -> byte*;
         };
 
         def strlen(byte* ps) -> int
@@ -40,6 +41,37 @@ namespace standard
                 c++;
             };
             return c;
+        };
+
+        def strstr(byte* haystack, byte* needle) -> byte*
+        {
+            byte* h, n;
+            if (*needle == 0) { return haystack; };
+            for (;;)
+            {
+                if (*haystack == 0) { return (byte*)0; };
+                h = haystack;
+                n = needle;
+                while (*h != 0 & *n != 0 & *h == *n)
+                {
+                    h = h + 1;
+                    n = n + 1;
+                };
+                if (*n == 0) { return haystack; };
+                haystack = haystack + 1;
+            };
+            return haystack;
+        };
+
+        def strchr(byte* str, int c) -> byte*
+        {
+            for (;;)
+            {
+                if (*str == c) { return str; };
+                if (*str == 0) { return (byte*)0; };
+                str = str + 1;
+            };
+            return (byte*)0;
         };
 
         def strcpy(noopstr dest, noopstr src) -> noopstr
@@ -299,9 +331,46 @@ namespace standard
 
         def str2i32(byte* str) -> int
         {
-            int result = 0;
+            int result, i, digit;
             int sign = 1;
-            int i = 0;
+            byte c;
+            while (str[i] == 32 | str[i] == 9 | str[i] == 10 | str[i] == 13)
+            {
+                i++;
+            };
+            if (str[i] == 45)  
+            {
+                sign = -1;
+                i++;
+            }
+            elif (str[i] == 43)  
+            {
+                i++;
+            };
+            while (str[i] != 0)
+            {
+                c = str[i];
+                if (c >= 48 & c <= 57)
+                {
+                    digit = (int)(c - 48);
+                    result = result * 10 + digit;
+                }
+                else
+                {
+                    break;
+                };
+                i++;
+            };
+            return result * sign;
+        };
+
+        // Convert string to unsigned 32-bit integer
+        // Returns 0 if string is invalid or negative
+        def str2u32(byte* str) -> uint
+        {
+            uint result, digit;
+            int i;
+            byte c;
             
             // Skip leading whitespace
             while (str[i] == 32 | str[i] == 9 | str[i] == 10 | str[i] == 13)
@@ -309,11 +378,10 @@ namespace standard
                 i++;
             };
             
-            // Check for sign
+            // Skip '+' if present, return 0 if '-' present
             if (str[i] == 45)  // '-'
             {
-                sign = -1;
-                i++;
+                return 0;  // Negative not allowed for unsigned
             }
             elif (str[i] == 43)  // '+'
             {
@@ -323,59 +391,13 @@ namespace standard
             // Convert digits
             while (str[i] != 0)
             {
-                byte c = str[i];
-                
-                // Check if character is a digit (0-9 are ASCII 48-57)
-                if (c >= 48 & c <= 57)
-                {
-                    int digit = (int)(c - 48);
-                    result = result * 10 + digit;
-                }
-                else
-                {
-                    // Non-digit character, stop parsing
-                    break;
-                };
-                
-                i++;
-            };
-            
-            return result * sign;
-        };
-
-        // Convert string to unsigned 32-bit integer
-        // Returns 0 if string is invalid or negative
-        def str2u32(byte* str) -> uint
-        {
-            uint result = (uint)0;
-            int i = 0;
-            
-            // Skip leading whitespace
-            while (str[i] == (byte)32 | str[i] == (byte)9 | str[i] == (byte)10 | str[i] == (byte)13)
-            {
-                i++;
-            };
-            
-            // Skip '+' if present, return 0 if '-' present
-            if (str[i] == (byte)45)  // '-'
-            {
-                return (uint)0;  // Negative not allowed for unsigned
-            }
-            elif (str[i] == (byte)43)  // '+'
-            {
-                i++;
-            };
-            
-            // Convert digits
-            while (str[i] != (byte)0)
-            {
-                byte c = str[i];
+                c = str[i];
                 
                 // Check if character is a digit
-                if (c >= (byte)48 & c <= (byte)57)
+                if (c >= 48 & c <= 57)
                 {
-                    uint digit = (uint)(c - (byte)48);
-                    result = result * (uint)10 + digit;
+                    digit = (uint)(c - 48);
+                    result = result * 10 + digit;
                 }
                 else
                 {
@@ -393,37 +415,38 @@ namespace standard
         // Returns 0 if string is invalid
         def str2i64(byte* str) -> i64
         {
-            i64 result = (i64)0;
-            i64 sign = (i64)1;
-            int i = 0;
+            i64 result, digit;
+            i64 sign = 1;
+            int i;
+            byte c;
             
             // Skip leading whitespace
-            while (str[i] == (byte)32 | str[i] == (byte)9 | str[i] == (byte)10 | str[i] == (byte)13)
+            while (str[i] == 32 | str[i] == 9 | str[i] == 10 | str[i] == 13)
             {
                 i++;
             };
             
             // Check for sign
-            if (str[i] == (byte)45)  // '-'
+            if (str[i] == 45)  // '-'
             {
                 sign = (i64)-1;
                 i++;
             }
-            elif (str[i] == (byte)43)  // '+'
+            elif (str[i] == 43)  // '+'
             {
                 i++;
             };
             
             // Convert digits
-            while (str[i] != (byte)0)
+            while (str[i] != 0)
             {
-                byte c = str[i];
+                c = str[i];
                 
                 // Check if character is a digit
-                if (c >= (byte)48 & c <= (byte)57)
+                if (c >= 48 & c <= 57)
                 {
-                    i64 digit = (i64)(c - (byte)48);
-                    result = result * (i64)10 + digit;
+                    digit = (i64)(c - 48);
+                    result = result * 10 + digit;
                 }
                 else
                 {
@@ -441,35 +464,36 @@ namespace standard
         // Returns 0 if string is invalid or negative
         def str2u64(byte* str) -> u64
         {
-            u64 result = (u64)0;
-            int i = 0;
+            u64 result, digit;
+            int i;
+            byte c;
             
             // Skip leading whitespace
-            while (str[i] == (byte)32 | str[i] == (byte)9 | str[i] == (byte)10 | str[i] == (byte)13)
+            while (str[i] == 32 | str[i] == 9 | str[i] == 10 | str[i] == 13)
             {
                 i++;
             };
             
             // Skip '+' if present, return 0 if '-' present
-            if (str[i] == (byte)45)  // '-'
+            if (str[i] == 45)  // '-'
             {
-                return (u64)0;  // Negative not allowed for unsigned
+                return 0;  // Negative not allowed for unsigned
             }
-            elif (str[i] == (byte)43)  // '+'
+            elif (str[i] == 43)  // '+'
             {
                 i++;
             };
             
             // Convert digits
-            while (str[i] != (byte)0)
+            while (str[i] != 0)
             {
-                byte c = str[i];
+                c = str[i];
                 
                 // Check if character is a digit
-                if (c >= (byte)48 & c <= (byte)57)
+                if (c >= 48 & c <= 57)
                 {
-                    u64 digit = (u64)(c - (byte)48);
-                    result = result * (u64)10 + digit;
+                    digit = (u64)(c - 48);
+                    result = result * 10 + digit;
                 }
                 else
                 {
@@ -487,12 +511,12 @@ namespace standard
         // Returns number of characters written (excluding null terminator)
         def float2str(float value, byte* buffer, i32 precision) -> i32
         {
-            i32 write_pos = 0;
+            i32 write_pos, i;
             
             // Handle negative numbers
             if (value < 0.0)
             {
-                buffer[0] = (byte)45; // '-'
+                buffer[0] = 45; // '-'
                 write_pos = 1;
                 value = -value;
             };
@@ -500,29 +524,28 @@ namespace standard
             // Handle zero case
             if (value == 0.0)
             {
-                buffer[write_pos] = (byte)48; // '0'
-                buffer[write_pos + 1] = (byte)46; // '.'
+                buffer[write_pos] = 48; // '0'
+                buffer[write_pos + 1] = 46; // '.'
                 
-                i32 i = 0;
                 while (i < precision)
                 {
-                    buffer[write_pos + 2 + i] = (byte)48; // '0'
+                    buffer[write_pos + 2 + i] = 48; // '0'
                     i++;
                 };
                 
-                buffer[write_pos + 2 + precision] = (byte)0;
+                buffer[write_pos + 2 + precision] = 0;
                 return write_pos + 1 + precision;
             };
             
             // Extract integer part
-            i32 int_part = (i32)value;
+            i32 int_part = int(value);
             
             // Extract fractional part
-            float fractional = value - (float)int_part;
+            float fractional = value - float(int_part);
             
             // Multiply fractional by 10^precision without helper function
-            i32 frac_multiplier = 1;
-            i32 j = 0;
+            i32 frac_multiplier = 1,
+                j;
             while (j < precision)
             {
                 frac_multiplier = frac_multiplier * 10;
@@ -557,8 +580,8 @@ namespace standard
             {
                 // Convert integer part in reverse
                 byte[32] int_temp;
-                i32 temp_pos = 0;
-                i32 temp_int = int_part;
+                i32 temp_pos,
+                    temp_int = int_part;
                 
                 while (temp_int > 0)
                 {
@@ -905,7 +928,7 @@ namespace standard
             def find_char_last(byte* str, char ch) -> int
             {
                 int last = -1;
-                for (int i = 0; str[i] != 0; i = i + 1)
+                for (int i; str[i] != 0; i = i + 1)
                 {
                     if (str[i] == ch)
                     {
@@ -920,7 +943,7 @@ namespace standard
             {
                 for (int i = start_pos; str[i] != 0; i = i + 1)
                 {
-                    for (int j = 0; char_set[j] != 0; j = j + 1)
+                    for (int j; char_set[j] != 0; j = j + 1)
                     {
                         if (str[i] == char_set[j])
                         {
@@ -935,10 +958,9 @@ namespace standard
             // Returns index or -1 if not found
             def find_substring(byte* str, byte* substr, int start_pos) -> int
             {
-                int str_len = 0;
+                int str_len, substr_len;
+                bool match = true;
                 while (str[str_len] != 0) { str_len = str_len + 1; };
-                
-                int substr_len = 0;
                 while (substr[substr_len] != 0) { substr_len = substr_len + 1; };
                 
                 if (substr_len == 0)
@@ -948,8 +970,7 @@ namespace standard
                 
                 for (int i = start_pos; i <= str_len - substr_len; i = i + 1)
                 {
-                    bool match = true;
-                    for (int j = 0; j < substr_len; j = j + 1)
+                    for (int j; j < substr_len; j = j + 1)
                     {
                         if (str[i + j] != substr[j])
                         {
@@ -1015,11 +1036,12 @@ namespace standard
             // Case-insensitive compare
             def compare_ignore_case(byte* s1, byte* s2) -> int
             {
-                int i = 0;
+                int i;
+                char c1, c2;
                 while (s1[i] != 0 & s2[i] != 0)
                 {
-                    char c1 = to_lower(s1[i]);
-                    char c2 = to_lower(s2[i]);
+                    c1 = to_lower(s1[i]);
+                    c2 = to_lower(s2[i]);
                     if (c1 != c2)
                     {
                         return c1 - c2;
@@ -1032,7 +1054,7 @@ namespace standard
             // Check if string starts with prefix
             def starts_with(byte* str, byte* prefix) -> bool
             {
-                int i = 0;
+                int i;
                 while (prefix[i] != 0)
                 {
                     if (str[i] != prefix[i])
@@ -1047,10 +1069,8 @@ namespace standard
             // Check if string ends with suffix
             def ends_with(byte* str, byte* suffix) -> bool
             {
-                int str_len = 0;
+                int str_len, suffix_len;
                 while (str[str_len] != 0) { str_len = str_len + 1; };
-                
-                int suffix_len = 0;
                 while (suffix[suffix_len] != 0) { suffix_len = suffix_len + 1; };
                 
                 if (suffix_len > str_len)
@@ -1205,10 +1225,10 @@ namespace standard
                 pos = pos + 2;
             };
             
-            int value = 0;
+            int value, digit;
             while (helpers::is_hex_digit(str[pos]))
             {
-                int digit = helpers::hex_to_int(str[pos]);
+                digit = helpers::hex_to_int(str[pos]);
                 value = value * 16 + digit;
                 pos = pos + 1;
             };
@@ -1223,8 +1243,8 @@ namespace standard
         // Count lines in string
         def count_lines(byte* str) -> int
         {
-            int count = 0;
-            for (int i = 0; str[i] != 0; i = i + 1)
+            int count;
+            for (int i; str[i] != 0; i = i + 1)
             {
                 if (str[i] == '\n')
                 {
@@ -1431,9 +1451,10 @@ def find_last_substring(byte* str, byte* substr) -> int
     };
     
     // Start from the end and work backwards
+    bool found = true;
     for (int i = str_len - sub_len; i >= 0; i = i - 1)
     {
-        bool found = true;
+        found = true;
         
         // Check if substring matches at position i
         for (int j = 0; j < sub_len; j = j + 1)
@@ -1493,10 +1514,11 @@ def count_substring(byte* str, byte* substr) -> int
     int count = 0;
     int pos = 0;
     
+    bool found = true;
     while (pos <= str_len - sub_len)
     {
+        found = true;
         // Check if substring matches at current position
-        bool found = true;
         for (int j = 0; j < sub_len; j = j + 1)
         {
             if (str[pos + j] != substr[j])
@@ -1547,7 +1569,7 @@ def !!strstr(byte* haystack, byte* needle) -> byte*
     // Special case: single character needle
     if (needle_len == 1)
     {
-        for (int i = 0; haystack[i] != 0; i = i + 1)
+        for (int i; haystack[i] != 0; i = i + 1)
         {
             if (haystack[i] == first_char)
             {
@@ -1558,15 +1580,15 @@ def !!strstr(byte* haystack, byte* needle) -> byte*
     };
     
     // Multi-character needle search
-    int h = 0;
+    int h;
+    bool match = true;
     while (haystack[h] != 0)
     {
         // Quick first-character check
         if (haystack[h] == first_char)
         {
             // Check remaining characters
-            bool match = true;
-            
+            match = true;            
             for (int n = 1; n < needle_len; n = n + 1)
             {
                 if (haystack[h + n] == 0)

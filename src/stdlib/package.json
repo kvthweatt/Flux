@@ -7,25 +7,32 @@
   "base_url": "https://raw.githubusercontent.com/kvthweatt/Flux/main/src/stdlib",
   "packages": {
     "flux-bigint": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "bigint.fx",
       "path": "",
       "description": "Arbitrary precision integer arithmetic",
-      "dependencies": {}
+      "dependencies": {
+        "flux-math": ">=1.0.1"
+      }
     },
     "flux-collections": {
-      "version": "1.0.0",
+      "version": "1.0.2",
       "entry": "collections.fx",
       "path": "",
       "description": "Generic collections: lists, maps, sets, queues, stacks",
-      "dependencies": {}
+      "dependencies": {
+        "flux-memory": ">=1.0.2",
+        "flux-types": ">=1.0.0"
+      }
     },
     "flux-console": {
       "version": "1.0.0",
       "entry": "console.fx",
       "path": "",
-      "description": "Console I/O utilities",
-      "dependencies": {}
+      "description": "Console graphics utilties for TUI environments",
+      "dependencies": {
+        "flux-types": ">=1.0.0"
+      }
     },
     "flux-cryptography": {
       "version": "1.0.0",
@@ -33,71 +40,106 @@
       "path": "",
       "description": "Cryptographic algorithms",
       "dependencies": {
-        "flux-bigint": ">=1.0.0"
+        "flux-bigint": ">=1.0.1",
+        "flux-types": ">=1.0.0"
       }
     },
     "flux-decimal": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "decimal.fx",
       "path": "",
       "description": "Arbitrary precision floating point arithmetic",
-      "dependencies": {}
+      "dependencies": {
+        "flux-bigint": ">=1.0.1"
+      }
     },
     "flux-detour": {
       "version": "1.0.0",
       "entry": "detour.fx",
       "path": "",
       "description": "Runtime function hooking and detouring",
-      "dependencies": {}
+      "dependencies": {
+        "flux-datautils": ">=1.0.0",
+        "flux-types": ">=1.0.0"
+      }
+    },
+    "flux-dotenv": {
+      "version": "1.0.1",
+      "entry": "dotenv.fx",
+      "path": "",
+      "description": "Environment variable loading from .env files",
+      "dependencies": {
+        "flux-standard": ">=1.0.0",
+        "flux-string-utilities": ">=1.0.3"
+      }
     },
     "flux-format": {
       "version": "1.0.0",
       "entry": "format.fx",
       "path": "",
       "description": "String formatting utilities",
-      "dependencies": {}
+      "dependencies": {
+        "flux-types": ">=1.0.0"
+      }
     },
     "flux-fourier": {
       "version": "1.0.0",
       "entry": "fourier.fx",
       "path": "",
       "description": "Fast Fourier Transform",
-      "dependencies": {}
+      "dependencies": {
+        "flux-math": ">=1.0.1",
+        "flux-memory": ">=1.0.2",
+        "flux-types": ">=1.0.0"
+      }
     },
     "flux-graphing": {
       "version": "1.0.0",
       "entry": "graphing.fx",
       "path": "",
       "description": "Graph data structures and algorithms",
-      "dependencies": {}
+      "dependencies": {
+        "flux-math": ">=1.0.1",
+        "flux-windows": ">=1.0.1"
+      }
     },
     "flux-io": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "io.fx",
       "path": "",
       "description": "Basic I/O (console & file)",
-      "dependencies": {}
+      "dependencies": {
+        "flux-sys": ">=1.0.0",
+        "flux-types": ">=1.0.0"
+      }
     },
     "flux-json": {
       "version": "1.0.0",
       "entry": "json.fx",
       "path": "",
       "description": "JSON parsing and serialization",
-      "dependencies": {}
+      "dependencies": {
+        "flux-allocators": ">=1.0.7",
+        "flux-standard": ">=1.0.0"
+      }
     },
     "flux-linux": {
       "version": "1.0.0",
       "entry": "linux.fx",
       "path": "",
       "description": "Linux platform bindings",
-      "dependencies": {}
+      "dependencies": {
+        "flux-types": ">=1.0.0"
+      }
     },
     "flux-math": {
-      "version": "1.0.0",
+      "version": "1.0.2",
       "entry": "math.fx",
       "path": "",
       "description": "Math functions and constants",
-      "dependencies": {}
+      "dependencies": {
+        "flux-types": ">=1.0.0"
+      }
     },
     "flux-net-linux": {
       "version": "1.0.0",
@@ -105,7 +147,9 @@
       "path": "",
       "description": "Networking for Linux",
       "dependencies": {
-        "flux-linux": ">=1.0.0"
+        "flux-linux": ">=1.0.0",
+        "flux-memory": ">=1.0.2",
+        "flux-types": ">=1.0.0"
       }
     },
     "flux-net-windows": {
@@ -114,7 +158,9 @@
       "path": "",
       "description": "Networking for Windows",
       "dependencies": {
-        "flux-windows": ">=1.0.0"
+        "flux-memory": ">=1.0.2",
+        "flux-sockets": ">=1.0.1",
+        "flux-types": ">=1.0.0"
       }
     },
     "flux-opengl": {
@@ -122,7 +168,9 @@
       "entry": "opengl.fx",
       "path": "",
       "description": "OpenGL bindings",
-      "dependencies": {}
+      "dependencies": {
+        "flux-windows": ">=1.0.1"
+      }
     },
     "flux-physics": {
       "version": "1.0.0",
@@ -130,8 +178,10 @@
       "path": "",
       "description": "Rigid and soft body physics simulation",
       "dependencies": {
-        "flux-math": ">=1.0.0",
-        "flux-vectors": ">=1.0.0"
+        "flux-math": ">=1.0.1",
+        "flux-memory": ">=1.0.2",
+        "flux-types": ">=1.0.0",
+        "flux-vectors": ">=1.0.1"
       }
     },
     "flux-random": {
@@ -139,7 +189,9 @@
       "entry": "random.fx",
       "path": "",
       "description": "Random number generation",
-      "dependencies": {}
+      "dependencies": {
+        "flux-types": ">=1.0.0"
+      }
     },
     "flux-raytracing": {
       "version": "1.0.0",
@@ -147,8 +199,12 @@
       "path": "",
       "description": "Ray tracing primitives and utilities",
       "dependencies": {
-        "flux-math": ">=1.0.0",
-        "flux-vectors": ">=1.0.0"
+        "flux-allocators": ">=1.0.7",
+        "flux-math": ">=1.0.1",
+        "flux-memory": ">=1.0.2",
+        "flux-random": ">=1.0.0",
+        "flux-types": ">=1.0.0",
+        "flux-vectors": ">=1.0.1"
       }
     },
     "flux-rle": {
@@ -156,14 +212,18 @@
       "entry": "rle.fx",
       "path": "",
       "description": "Run-length encoding compression",
-      "dependencies": {}
+      "dependencies": {
+        "flux-string-utilities": ">=1.0.3"
+      }
     },
     "flux-standard": {
       "version": "1.0.0",
       "entry": "standard.fx",
       "path": "",
       "description": "Standard import for any Flux program",
-      "dependencies": {}
+      "dependencies": {
+        "flux-runtime": ">=1.0.2"
+      }
     },
     "flux-sys": {
       "version": "1.0.0",
@@ -179,7 +239,9 @@
       "description": "TLS 1.3",
       "dependencies": {
         "flux-cryptography": ">=1.0.0",
-        "flux-net-windows": ">=1.0.0"
+        "flux-net-linux": ">=1.0.0",
+        "flux-net-windows": ">=1.0.1",
+        "flux-types": ">=1.0.0"
       }
     },
     "flux-types": {
@@ -195,16 +257,18 @@
       "path": "",
       "description": "UUID generation",
       "dependencies": {
-        "flux-random": ">=1.0.0"
+        "flux-random": ">=1.0.0",
+        "flux-types": ">=1.0.0"
       }
     },
     "flux-vectors": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "vectors.fx",
       "path": "",
       "description": "Vector math (2D, 3D, 4D)",
       "dependencies": {
-        "flux-math": ">=1.0.0"
+        "flux-math": ">=1.0.1",
+        "flux-types": ">=1.0.0"
       }
     },
     "flux-wasapi": {
@@ -213,99 +277,142 @@
       "path": "",
       "description": "Windows Audio Session API bindings",
       "dependencies": {
-        "flux-windows": ">=1.0.0"
+        "flux-types": ">=1.0.0",
+        "flux-windows": ">=1.0.1"
       }
     },
     "flux-windows": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "windows.fx",
       "path": "",
       "description": "Windows platform bindings",
-      "dependencies": {}
+      "dependencies": {
+        "flux-math": ">=1.0.1",
+        "flux-types": ">=1.0.0"
+      }
     },
     "flux-file": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "file_object_raw.fx",
       "path": "builtins",
       "description": "Raw file object",
-      "dependencies": {}
+      "dependencies": {
+        "flux-ffifio": ">=1.0.0",
+        "flux-types": ">=1.0.0"
+      }
     },
     "flux-sockets": {
       "version": "1.0.1",
       "entry": "socket_object_raw.fx",
       "path": "builtins",
       "description": "Raw socket object",
-      "dependencies": {}
+      "dependencies": {
+        "flux-io": ">=1.0.1",
+        "flux-net-windows": ">=1.0.1"
+      }
     },
     "flux-string": {
-      "version": "1.0.0",
+      "version": "1.0.4",
       "entry": "string_object_raw.fx",
       "path": "builtins",
       "description": "Raw string object",
-      "dependencies": {}
+      "dependencies": {
+        "flux-io": ">=1.0.1",
+        "flux-string-utilities": ">=1.0.3"
+      }
     },
     "flux-allocators": {
-      "version": "1.0.1",
+      "version": "1.0.7",
       "entry": "allocators.fx",
       "path": "runtime",
-      "description": "Memory allocators",
-      "dependencies": {}
+      "description": "Standard memory allocators",
+      "dependencies": {
+        "flux-types": ">=1.0.0"
+      }
     },
     "flux-atomics": {
       "version": "1.0.0",
       "entry": "atomics.fx",
       "path": "runtime",
       "description": "Atomic operations",
-      "dependencies": {}
+      "dependencies": {
+        "flux-types": ">=1.0.0"
+      }
     },
     "flux-ffifio": {
       "version": "1.0.0",
       "entry": "ffifio.fx",
       "path": "runtime",
       "description": "FFI-based file I/O",
-      "dependencies": {}
+      "dependencies": {
+        "flux-io": ">=1.0.1",
+        "flux-types": ">=1.0.0"
+      }
     },
     "flux-memory": {
-      "version": "1.0.1",
+      "version": "1.0.2",
       "entry": "memory.fx",
       "path": "runtime",
       "description": "Memory management primitives",
-      "dependencies": {}
+      "dependencies": {
+        "flux-allocators": ">=1.0.7",
+        "flux-types": ">=1.0.0"
+      }
     },
     "flux-operators": {
       "version": "1.0.0",
       "entry": "operators.fx",
       "path": "runtime",
       "description": "Standard operators",
-      "dependencies": {}
+      "dependencies": {
+        "flux-types": ">=1.0.0"
+      }
     },
     "flux-runtime": {
-      "version": "1.0.0",
+      "version": "1.0.2",
       "entry": "runtime.fx",
       "path": "runtime",
       "description": "Flux runtime core",
-      "dependencies": {}
+      "dependencies": {
+        "flux-ffifio": ">=1.0.0",
+        "flux-file": ">=1.0.1",
+        "flux-io": ">=1.0.1",
+        "flux-memory": ">=1.0.2",
+        "flux-string": ">=1.0.4",
+        "flux-string-utilities": ">=1.0.3",
+        "flux-sys": ">=1.0.0",
+        "flux-timing": ">=1.0.2",
+        "flux-types": ">=1.0.0"
+      }
     },
     "flux-sharedmemory": {
       "version": "1.0.0",
       "entry": "sharedmemory.fx",
       "path": "runtime",
       "description": "Shared memory module for IPC",
-      "dependencies": {}
+      "dependencies": {
+        "flux-types": ">=1.0.0"
+      }
     },
     "flux-threading": {
       "version": "1.0.0",
       "entry": "threading.fx",
       "path": "runtime",
       "description": "Thread creation and synchronization",
-      "dependencies": {}
+      "dependencies": {
+        "flux-atomics": ">=1.0.0",
+        "flux-types": ">=1.0.0"
+      }
     },
     "flux-timing": {
-      "version": "1.0.0",
+      "version": "1.0.2",
       "entry": "timing.fx",
       "path": "runtime",
       "description": "High-resolution timers and sleep",
-      "dependencies": {}
+      "dependencies": {
+        "flux-sys": ">=1.0.0",
+        "flux-types": ">=1.0.0"
+      }
     },
     "flux-datautils": {
       "version": "1.0.0",
@@ -315,7 +422,7 @@
       "dependencies": {}
     },
     "flux-string-utilities": {
-      "version": "1.0.1",
+      "version": "1.0.3",
       "entry": "string_utilities.fx",
       "path": "utility",
       "description": "String manipulation utilities",

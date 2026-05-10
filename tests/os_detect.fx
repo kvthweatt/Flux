@@ -1,5 +1,7 @@
 #import "redstandard.fx";
 
+using standard::io::console;
+
 def main() -> int
 {
     #ifdef __WINDOWS__

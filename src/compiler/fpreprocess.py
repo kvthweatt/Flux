@@ -2,16 +2,20 @@ import os
 from pathlib import Path
 from typing import Set, Dict, Optional, List
 
+FLUXC_SRCDIR = Path(os.environ.get("FLUXC_SRCDIR", Path(__file__).parent)).resolve()
+
 class FXPreprocessor:
-    def __init__(self, source_file, compiler_macros=None):
+    def __init__(self, source_file, compiler_constants=None):
         self.source_file = source_file
         self.processed_files: Set[str] = set()
         self.output_lines = []
-        self.macros: Dict[str, str] = {}
+        self.constants: Dict[str, str] = {}
         self.lib_dirs: List[str] = []
-        
-        if compiler_macros:
-            self.macros.update(compiler_macros)
+        # Maps each output line index (0-based) -> (filename, local_line_number 1-based)
+        self.line_map: List[tuple] = []
+
+        if compiler_constants:
+            self.constants.update(compiler_constants)
     
     def process(self) -> str:
         """Main processing pipeline"""
@@ -21,25 +25,25 @@ class FXPreprocessor:
         # Step 2: Build combined source
         combined_source = '\n'.join(self.output_lines)
         
-        # Step 4: Keep replacing macros until no more replacements occur
+        # Step 4: Keep replacing constants until no more replacements occur
         replaced = True
         iteration = 0
         while replaced:
             iteration += 1
-            print(f"[PREPROCESSOR] Macro substitution passes: {iteration}")
+            print(f"[PREPROCESSOR] constant substitution passes: {iteration}")
             replaced = False
             lines = combined_source.split('\n')
             new_lines = []
             
             for line in lines:
-                new_line = self._substitute_macros(line)
+                new_line = self._substitute_constants(line)
                 if new_line != line:
                     replaced = True
                 new_lines.append(new_line)
             
             combined_source = '\n'.join(new_lines)
         ending = "es." if iteration > 1 else "."
-        print(f"[PREPROCESSOR] Completed after {iteration} macro pass{ending}")
+        print(f"[PREPROCESSOR] Completed after {iteration} constant pass{ending}")
         
         # Step 5: Write to build/tmp.fx
         build_dir = Path("build")
@@ -115,7 +119,7 @@ class FXPreprocessor:
             return path
         
         # Try relative to current directory
-        cwd = Path.cwd()
+        cwd = FLUXC_SRCDIR
         
         # Common locations to check
         locations = [
@@ -126,6 +130,18 @@ class FXPreprocessor:
             cwd / "src" / "stdlib" / "builtins" / filepath,
             cwd / "src" / "stdlib" / "utility" / filepath
         ]
+        
+        # Search all package subfolders under CWD/.fpm/packages/ recursively
+        fpm_packages_dir = Path.cwd() / ".fpm" / "packages"
+        if fpm_packages_dir.is_dir():
+            for package_dir in sorted(fpm_packages_dir.iterdir()):
+                if package_dir.is_dir():
+                    # Direct match inside the package root
+                    locations.append(package_dir / filepath)
+                    # Also search all subdirectories within the package recursively
+                    for sub_dir in sorted(package_dir.rglob("*")):
+                        if sub_dir.is_dir():
+                            locations.append(sub_dir / filepath)
         
         # Also search any directories added via #dir
         for lib_dir in self.lib_dirs:
@@ -168,11 +184,18 @@ class FXPreprocessor:
                     directive = s.split()[0]
                     raise SyntaxError(f"[PREPROCESSOR] {directive} directive missing semicolon in {filepath} at line {lineno}")
         
-        # Process line by line
+        # Process line by line, tracking current file and local line number
         lines = content.splitlines()
+        prev_current_file = getattr(self, '_current_file', None)
+        prev_current_lines = getattr(self, '_current_lines', None)
+        self._current_file = str(resolved_path)
+        self._current_lines = lines
         i = 0
         while i < len(lines):
+            self._current_local_lineno = i + 1  # 1-based
             i = self._process_line(lines, i)
+        self._current_file = prev_current_file
+        self._current_lines = prev_current_lines
     
     def _process_line(self, lines: List[str], i: int) -> int:
         """Process a single line, return next line index"""
@@ -208,35 +231,35 @@ class FXPreprocessor:
                 semicolon_pos = len(line)
             
             # Extract the part up to semicolon
-            macro_line = line[:semicolon_pos].strip()
+            constant_line = line[:semicolon_pos].strip()
             
-            parts = macro_line.split()
+            parts = constant_line.split()
             if len(parts) >= 3:
-                macro_name = parts[1]
-                # Join the rest as the value (skip #def and macro_name)
-                macro_value = ' '.join(parts[2:]).strip()
+                constant_name = parts[1]
+                # Join the rest as the value (skip #def and constant_name)
+                constant_value = ' '.join(parts[2:]).strip()
                 
                 # Remove any trailing semicolon if it's still there
-                if macro_value.endswith(';'):
-                    macro_value = macro_value.rstrip(';').strip()
+                if constant_value.endswith(';'):
+                    constant_value = constant_value.rstrip(';').strip()
                     
-                self.macros[macro_name] = macro_value
-                print(f"[PREPROCESSOR] Defined macro: {macro_name} = {macro_value}")
+                self.constants[constant_name] = constant_value
+                print(f"[PREPROCESSOR] Defined constant: {constant_name} = {constant_value}")
             return i + 1
         
         # Check for #ifdef
         if stripped.startswith("#ifdef"):
             parts = line.split()
             if len(parts) >= 2:
-                macro_name = parts[1]
-                return self._process_conditional_block(lines, i, macro_name, False)
+                constant_name = parts[1]
+                return self._process_conditional_block(lines, i, constant_name, False)
         
         # Check for #ifndef
         if stripped.startswith("#ifndef"):
             parts = line.split()
             if len(parts) >= 2:
-                macro_name = parts[1]
-                return self._process_conditional_block(lines, i, macro_name, True)
+                constant_name = parts[1]
+                return self._process_conditional_block(lines, i, constant_name, True)
         
         # Check for import
         if stripped.startswith("#import"):
@@ -284,7 +307,7 @@ class FXPreprocessor:
                 if end_idx != -1:
                     message = line[start_idx + 1:end_idx]
                     print(f"[PREPROCESSOR] {message}")
-            print("Compilation failed, preprocessor stopped by macro.")
+            print("Compilation failed, preprocessor stopped by constant.")
             raise SystemExit(1)
         
         # Check for #endif - skip it
@@ -295,28 +318,30 @@ class FXPreprocessor:
         if stripped == "#else":
             return i + 1
         
-        # Regular line - do macro substitution
-        processed_line = self._substitute_macros(line)
+        # Regular line - do constant substitution
+        processed_line = self._substitute_constants(line)
+        self.line_map.append((getattr(self, '_current_file', self.source_file), self._current_local_lineno))
         self.output_lines.append(processed_line)
         return i + 1
     
-    def _process_conditional_block(self, lines: List[str], start_i: int, macro_name: str, is_ifndef: bool) -> int:
+    def _process_conditional_block(self, lines: List[str], start_i: int, constant_name: str, is_ifndef: bool) -> int:
         """Process an #ifdef/#ifndef block and return next line index after #endif"""
-        # Get macro value
-        macro_value = self.macros.get(macro_name)
+        # Get constant value
+        constant_value = self.constants.get(constant_name)
         
         # Evaluate condition
         if is_ifndef:
-            condition_true = macro_value is None or macro_value == '0'
+            condition_true = constant_value is None or constant_value == '0'
         else:
-            condition_true = macro_value is not None and macro_value != '0'
+            condition_true = constant_value is not None and constant_value != '0'
         i = start_i + 1
         depth = 1
         in_else = False
         else_seen = False
         
-        # Store lines that should be included
+        # Store lines that should be included, paired with their original local line numbers
         lines_to_include = []
+        origins_to_include = []  # parallel list: local line number (1-based) for each entry
         
         while i < len(lines):
             line = lines[i]
@@ -343,6 +368,7 @@ class FXPreprocessor:
                     if lines_to_include:
                         j = 0
                         while j < len(lines_to_include):
+                            self._current_local_lineno = origins_to_include[j]
                             j = self._process_line(lines_to_include, j)
                     return i + 1
             
@@ -351,17 +377,19 @@ class FXPreprocessor:
                 # Inside nested block - always include
                 if (condition_true and not in_else) or (not condition_true and in_else):
                     lines_to_include.append(line)
+                    origins_to_include.append(i + 1)
             else:
                 # Our depth level
                 if (condition_true and not in_else) or (not condition_true and in_else):
                     lines_to_include.append(line)
+                    origins_to_include.append(i + 1)
             
             i += 1
         
         raise SyntaxError(f"Unclosed conditional block starting at line {start_i + 1}")
     
-    def _substitute_macros(self, line: str) -> str:
-        """Simple macro substitution - replace macro names with their values"""
+    def _substitute_constants(self, line: str) -> str:
+        """Simple constant substitution - replace constant names with their values"""
         if not line or line.strip() == ';':
             return line
         
@@ -377,14 +405,14 @@ class FXPreprocessor:
             elif char.isspace() or char in '.,;:()[]{}+-*/%=!<>|&^~':
                 # End of token
                 if current_token:
-                    # Check if token is a macro
-                    if not in_quotes and current_token in self.macros:
-                        # Get macro value and strip trailing semicolon if present
-                        macro_value = self.macros[current_token]
+                    # Check if token is a constant
+                    if not in_quotes and current_token in self.constants:
+                        # Get constant value and strip trailing semicolon if present
+                        constant_value = self.constants[current_token]
                         # Remove trailing semicolon if it's at the end
-                        if macro_value.endswith(';'):
-                            macro_value = macro_value.rstrip(';').strip()
-                        result_parts.append(macro_value)
+                        if constant_value.endswith(';'):
+                            constant_value = constant_value.rstrip(';').strip()
+                        result_parts.append(constant_value)
                     else:
                         result_parts.append(current_token)
                     current_token = ""
@@ -394,12 +422,12 @@ class FXPreprocessor:
         
         # Handle last token
         if current_token:
-            if not in_quotes and current_token in self.macros:
-                macro_value = self.macros[current_token]
+            if not in_quotes and current_token in self.constants:
+                constant_value = self.constants[current_token]
                 # Remove trailing semicolon if it's at the end
-                if macro_value.endswith(';'):
-                    macro_value = macro_value.rstrip(';').strip()
-                result_parts.append(macro_value)
+                if constant_value.endswith(';'):
+                    constant_value = constant_value.rstrip(';').strip()
+                result_parts.append(constant_value)
             else:
                 result_parts.append(current_token)
         

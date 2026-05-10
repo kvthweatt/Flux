@@ -58,7 +58,7 @@ namespace standard
 
             // String types
             byte* as LPCSTR,      // Pointer to const string
-                    LPSTR;        // Pointer to string
+                     LPSTR;       // Pointer to string
 
             // Window procedure callback type (opaque function pointer - same size as void*)
             u64* as WNDPROC;
@@ -209,13 +209,16 @@ namespace standard
                        VK_RIGHT   = 0x27,
                        VK_UP      = 0x26,
                        VK_DOWN    = 0x28,
+                       VK_LBUTTON = 0x01,
                        VK_HOME    = 0x24,
                        VK_END     = 0x23,
                        VK_PRIOR   = 0x21,
                        VK_NEXT    = 0x22,
                        VK_RETURN  = 0x0D,
                        VK_SHIFT   = 0x10,
-                       VK_CONTROL = 0x11;
+                       VK_CONTROL = 0x11,
+                       VK_OEM_PLUS  = 0x0BB,
+                       VK_OEM_MINUS = 0xBD;
 
             // Pen styles (CreatePen)
             global int PS_SOLID      = 0,
@@ -319,11 +322,13 @@ namespace standard
                     GetStockObject(int) -> HBRUSH,
                 
                 // Cursor and Icon
+                    GetCursorPos(POINT*) -> bool,
                     LoadCursorA(HINSTANCE, LPCSTR) -> HCURSOR,
                     LoadIconA(HINSTANCE, LPCSTR) -> HICON,
                     GetAsyncKeyState(int) -> WORD,
 
                 // Menu GUI
+                    ScreenToClient(void*, POINT*) -> bool,
                     CreateMenu() -> HMENU,
                     CreatePopupMenu() -> HMENU,
                     AppendMenuA(HMENU, UINT, UINT_PTR, LPCSTR) -> bool,
@@ -566,6 +571,12 @@ namespace standard
                     UnregisterClassA((LPCSTR)this.class_name, this.instance);
                     return;
                 };
+
+                // Return window handle
+                def __expr() -> HWND
+                {
+                    return this.handle;
+                };
                 
                 // Show window
                 def show() -> void
@@ -649,6 +660,12 @@ namespace standard
                     DeleteObject(this.back_bmp);
                     DeleteDC(this.back_dc);
                     return;
+                };
+
+                // Returns this.hwnd
+                def __expr() -> HWND
+                {
+                    return this.hwnd;
                 };
 
                 // Clear the canvas with a solid color

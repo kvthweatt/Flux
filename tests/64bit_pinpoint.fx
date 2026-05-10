@@ -6,6 +6,9 @@
 #import "tests\\64bit_direct_test.fx";
 #import "tests\\64bit_direct_test2.fx";
 
+
+using standard::io::console;
+
 def pinpoint_llvm_bug() -> int
 {
     byte[32] buf;

@@ -1,5 +1,8 @@
 #import "standard.fx";
 
+
+using standard::io::console;
+
 def signed_vs_unsigned() -> int
 {
     byte[32] buf;

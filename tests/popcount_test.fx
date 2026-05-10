@@ -1,6 +1,9 @@
 #import "standard.fx";
 
-#import "redmath.fx";
+#import "math.fx";
+
+
+using standard::io::console;
 
 #def MAX_32 (i32)0xFFFFFFFF;
 #def MAX_64 (u64)0xFFFFFFFFFFFFFFFF;

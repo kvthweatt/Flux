@@ -117,19 +117,19 @@ namespace standard
 // GL EXTENSION FUNCTION POINTERS
 // ============================================================================
 
-def{}* glCreateShader_fp(int)                 -> int;
-def{}* glShaderSource_fp(int,int,byte**,int*) -> void;
-def{}* glCompileShader_fp(int)                -> void;
-def{}* glCreateProgram_fp()                   -> int;
-def{}* glAttachShader_fp(int,int)             -> void;
-def{}* glLinkProgram_fp(int)                  -> void;
-def{}* glUseProgram_fp(int)                   -> void;
-def{}* glGetUniformLocation_fp(int,byte*)     -> int;
-def{}* glUniform1i_fp(int,int)                -> void;
-def{}* glUniform2f_fp(int,float,float)        -> void;
-def{}* glActiveTexture_fp(int)                -> void;
-def{}* glDeleteShader_fp(int)                 -> void;
-def{}* glDeleteProgram_fp(int)                -> void;
+def{}* glCreateShader_fp(int)                 -> int,
+       glShaderSource_fp(int,int,byte**,int*) -> void,
+       glCompileShader_fp(int)                -> void,
+       glCreateProgram_fp()                   -> int,
+       glAttachShader_fp(int,int)             -> void,
+       glLinkProgram_fp(int)                  -> void,
+       glUseProgram_fp(int)                   -> void,
+       glGetUniformLocation_fp(int,byte*)     -> int,
+       glUniform1i_fp(int,int)                -> void,
+       glUniform2f_fp(int,float,float)        -> void,
+       glActiveTexture_fp(int)                -> void,
+       glDeleteShader_fp(int)                 -> void,
+       glDeleteProgram_fp(int)                -> void;
 
 def compile_shader(int shader_type, byte* src) -> int
 {
@@ -872,6 +872,11 @@ namespace standard
                         wglDeleteContext(this.rc);
                     };
                     return;
+                };
+
+                def __expr() -> HDC
+                {
+                    return this.dc;
                 };
 
                 // Load extension function pointers - call once after init

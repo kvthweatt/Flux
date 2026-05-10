@@ -1,4 +1,4 @@
-#import "standard.fx", "math.fx", "windows.fx", "opengl.fx", "threading.fx", "random.fx";
+#import "standard.fx", "math.fx", "windows.fx", "opengl.fx", "timing.fx", "threading.fx", "random.fx";
 
 using standard::io::console,
       standard::math,
@@ -28,33 +28,27 @@ const int WIN_W          = 1024,
 // Game state
 struct GameState
 {
-    bool paused;
-    bool running;
-    bool dirty;
-    int  generation;
-    int  speed_ms;                       // Milliseconds between updates (lower = faster)
-    int  living_count;
-    int  stable_counter;                 // Counts how many frames with no change
+    bool paused, running,
+         dirty;
+    int  generation,
+         speed_ms,                       // Milliseconds between updates (lower = faster)
+         living_count,
+         stable_counter;                 // Counts how many frames with no change
 };
 
 // Grid buffers for double-buffering
 struct Grid
 {
-    byte* front;
-    byte* back;
-    int   width;
-    int   height;
+    byte* front, back;
+    int   width, height;
 };
 
 // Work slice for parallel processing
 struct WorkSlice
 {
-    int row_start;
-    int row_end;
-    int width;
-    int height;
-    byte* src;
-    byte* dst;
+    int row_start, row_end,
+        width,height;
+    byte* src, dst;
 };
 
 // ============================================================================
@@ -66,10 +60,10 @@ def grid_alloc(int width, int height) -> Grid
     Grid g;
     g.width  = width;
     g.height = height;
-    size_t bytes = (size_t)(width * height);
+    size_t bytes = width * height;
     g.front = (byte*)fmalloc(bytes);
     g.back  = (byte*)fmalloc(bytes);
-    if ((u64)g.front == 0 | (u64)g.back == 0)
+    if (g.front == 0 | g.back == 0)
     {
         print("Failed to allocate grid buffers!\n\0");
         g.width = 0;
@@ -129,7 +123,7 @@ def grid_get_cell(Grid* g, int x, int y) -> bool
 
 def count_neighbors(Grid* g, int x, int y) -> int
 {
-    int count = 0;
+    int count;
     for (int dy = -1; dy <= 1; dy++)
     {
         for (int dx = -1; dx <= 1; dx++)
@@ -172,20 +166,21 @@ def update_cell(Grid* g, int x, int y) -> bool
 def worker_update(void* arg) -> void*
 {
     WorkSlice* sl = (WorkSlice*)arg;
+    bool new_state;
+    Grid temp;
     
     for (int y = sl.row_start; y < sl.row_end; y++)
     {
-        for (int x = 0; x < sl.width; x++)
+        for (int x; x < sl.width; x++)
         {
             // Temporarily copy src to a local grid for neighbor checks
             // (we need to read from src while writing to dst)
-            Grid temp;
             temp.front = sl.src;
             temp.back  = (byte*)0;
             temp.width = sl.width;
             temp.height = sl.height;
             
-            bool new_state = update_cell(@temp, x, y);
+            new_state = update_cell(@temp, x, y);
             sl.dst[y * sl.width + x] = new_state ? 1 : 0;
         };
     };
@@ -245,17 +240,19 @@ def render_grid(Grid* g, i32 tex_id, int cols, int rows) -> void
     // We'll use a simple palette: live cells are white, dead cells are black
     // But we can also color based on age or population
     
-    size_t pixel_count = (size_t)(cols * rows);
+    size_t pixel_count = (size_t)(cols * rows),
+           idx, pix_idx;
     float* pixels = (float*)fmalloc(pixel_count * 3 * 4);  // RGB floats
+    float r, grn, b;
+    bool alive;
     
-    for (int y = 0; y < rows; y++)
+    for (int y; y < rows; y++)
     {
-        for (int x = 0; x < cols; x++)
+        for (int x; x < cols; x++)
         {
-            size_t idx = (size_t)(y * cols + x);
-            bool alive = grid_get_cell(g, x, y);
-            
-            float r, grn, b;
+            idx = (size_t)(y * cols + x);
+            alive = grid_get_cell(g, x, y);
+
             if (alive)
             {
                 // Living cells: bright green with slight glow
@@ -271,7 +268,7 @@ def render_grid(Grid* g, i32 tex_id, int cols, int rows) -> void
                 b   = 0.1f;
             };
             
-            size_t pix_idx = idx * 3;
+            pix_idx = idx * 3;
             pixels[pix_idx]     = r;
             pixels[pix_idx + 1] = grn;
             pixels[pix_idx + 2] = b;
@@ -388,8 +385,7 @@ def main() -> int
     
     // Initialize with a glider gun pattern for interesting behavior
     // Classic Gosper Glider Gun
-    struct Point { int x, y; };
-    Point[] glider_gun = [
+    POINT[] glider_gun = [
         {1, 5}, {1, 6}, {2, 5}, {2, 6},
         {11, 5}, {11, 6}, {11, 7}, {12, 4}, {12, 8}, {13, 3}, {13, 9},
         {14, 3}, {14, 9}, {15, 6}, {16, 4}, {16, 8}, {17, 5}, {17, 6},
@@ -397,11 +393,13 @@ def main() -> int
         {22, 5}, {23, 2}, {23, 6}, {25, 1}, {25, 2}, {25, 6}, {25, 7},
         {35, 3}, {35, 4}, {36, 3}, {36, 4}
     ];
+
+    int x,y;
     
-    for (int i = 0; i < sizeof(glider_gun) / sizeof(Point); i++)
+    for (int i = 0; i < sizeof(glider_gun) / sizeof(POINT); i++)
     {
-        int x = glider_gun[i].x + 50;
-        int y = glider_gun[i].y + 50;
+        x = glider_gun[i].x + 50;
+        y = glider_gun[i].y + 50;
         if (x < GRID_W & y < GRID_H)
         {
             grid.front[y * GRID_W + x] = 1;
@@ -420,18 +418,30 @@ def main() -> int
     
     // Input state
     WORD space_state, c_state, r_state, s_state, plus_state, minus_state;
-    bool mouse_clicked = false;
-    int last_mouse_x = 0, last_mouse_y = 0;
+    bool mouse_clicked,
+         clicked, alive;
+    int last_mouse_x, last_mouse_y,
+        cell_x, cell_y,
+        changes,
+        living;
+
+    size_t total;
     
     // Timing
-    DWORD t_last = GetTickCount();
-    DWORD t_sim_last = GetTickCount();
+    DWORD t_last = GetTickCount(),
+          t_sim_last = GetTickCount(),
+          t_now, dt,
+          t_sim_now;
+
+    WORD lbutton;
+
+    POINT cursor;
     
     while (win.process_messages())
     {
         // Get current time
-        DWORD t_now = GetTickCount();
-        DWORD dt = t_now - t_last;
+        t_now = GetTickCount();
+        dt = t_now - t_last;
         t_last = t_now;
         
         // Handle input
@@ -474,7 +484,6 @@ def main() -> int
         // 'S': single step (when paused)
         if ((s_state `& 0x8000) != 0 & state.paused)
         {
-            int changes;
             update_grid(@grid, num_threads, @changes);
             state.generation++;
             state.dirty = true;
@@ -497,22 +506,21 @@ def main() -> int
         
         // Mouse input for toggling cells (when paused)
         // Get cursor position relative to window
-        POINT cursor;
         GetCursorPos(@cursor);
-        ScreenToClient(win.handle, @cursor);
+        ScreenToClient(@win.handle, @cursor);
         
         if (cursor.x >= 0 & cursor.x < WIN_W & cursor.y >= 0 & cursor.y < WIN_H)
         {
-            int cell_x = cursor.x / CELL_SIZE;
-            int cell_y = cursor.y / CELL_SIZE;
+            cell_x = cursor.x / CELL_SIZE;
+            cell_y = cursor.y / CELL_SIZE;
             
             // Check for left mouse button
-            WORD lbutton = GetAsyncKeyState(VK_LBUTTON);
-            bool clicked = (lbutton `& 0x8000) != 0;
+            lbutton = GetAsyncKeyState(VK_LBUTTON);
+            clicked = (lbutton `& 0x8000) != 0;
             
             if (clicked & !mouse_clicked & state.paused)
             {
-                bool alive = grid_get_cell(@grid, cell_x, cell_y);
+                alive = grid_get_cell(@grid, cell_x, cell_y);
                 grid_set_cell(@grid, cell_x, cell_y, !alive);
                 state.dirty = true;
                 mouse_clicked = true;
@@ -526,10 +534,9 @@ def main() -> int
         // Update simulation (if not paused)
         if (!state.paused)
         {
-            DWORD t_sim_now = GetTickCount();
+            t_sim_now = GetTickCount();
             if (t_sim_now - t_sim_last >= (DWORD)state.speed_ms)
             {
-                int changes;
                 update_grid(@grid, num_threads, @changes);
                 state.generation++;
                 t_sim_last = t_sim_now;
@@ -555,9 +562,9 @@ def main() -> int
         // Count living cells
         if (state.dirty)
         {
-            int living = 0;
-            size_t total = (size_t)(GRID_W * GRID_H);
-            for (size_t i = 0; i < total; i++)
+            living = 0;
+            total = (size_t)(GRID_W * GRID_H);
+            for (size_t i; i < total; i++)
             {
                 if (grid.front[i]) { living++; };
             };
@@ -607,7 +614,7 @@ def main() -> int
         state.dirty = false;
         
         // Small sleep to prevent CPU spinning
-        thread_sleep_ms(10);
+        //thread_sleep_ms(10);
     };
     
     // Cleanup

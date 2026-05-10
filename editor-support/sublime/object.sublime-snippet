@@ -7,7 +7,9 @@
         return this;
     };
 
-    def __exit() -> void { return; };
+    def __expr() -> ${1:name}* { return this; };
+
+    def __exit() -> void { (void)this; return; };
 
     ${4};
 };]]></content>

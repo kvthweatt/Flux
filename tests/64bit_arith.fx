@@ -1,5 +1,7 @@
 #import "standard.fx";
 
+using standard::io::console;
+
 def test_64bit_arithmetic() -> int
 {
     byte[32] buffer;

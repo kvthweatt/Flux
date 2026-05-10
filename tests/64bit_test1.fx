@@ -1,5 +1,7 @@
 #import "standard.fx";
 
+using standard::io::console;
+
 #ifndef __FLUX_TEST__
 def main() -> int
 {

@@ -1,5 +1,8 @@
 #import "standard.fx";
 
+
+using standard::io::console;
+
 def test_individual_operations() -> int
 {
     byte[32] buf;

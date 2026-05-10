@@ -1,5 +1,7 @@
 #import "standard.fx";
 
+using standard::io::console;
+
 def check_literal_types() -> int
 {
     byte[32] buffer;

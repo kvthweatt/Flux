@@ -71,8 +71,10 @@ class TokenType(Enum):
     ELSE = auto()         # "        else
     ENUM = auto()         # "        enum
     ESCAPE_KW = auto()    # "        escape
+    EXPORT = auto()       # "        export
     EXTERN = auto()       # "        extern
     FALSE = auto()        # "        false
+    FASTNODE = auto()     # "        fastnode
     FLOAT_KW = auto()     # "        float
     FOR = auto()          # "        for
     FROM = auto()         # "        from
@@ -89,6 +91,7 @@ class TokenType(Enum):
     ULONG = auto()        # "        ulong
     SINT = auto()         # "        int
     UINT = auto()         # "        uint
+    MACRO = auto()        # "        macro
     NAMESPACE = auto()    # "        namespace
     NOT = auto()          # "        not            Represents operator: !
     NO_INIT = auto()      # "        noinit
@@ -195,21 +198,23 @@ class TokenType(Enum):
     SCOPE = auto()          # ::
     QUESTION = auto()       # ?     a?b:c = Parse as ternary
     TERNARY_ASSIGN = auto() # ?=    x ?= 45 // assign if x == 0
+    ADDRESS_ASSIGN = auto() # @=    byte* x @= "I love anonymous allocations!";
+    NULL_COALESCE = auto()  # ??
+    NOT_NULL = auto()       # !?
     COLON = auto()          # :
     TIE = auto()            # ~             Ownership/move semantics
-    LAMBDA_ARROW = auto()   # <:-
 
     # Directionals
     RETURN_ARROW = auto()   # ->
     CHAIN_ARROW = auto()    # <-
     RECURSE_ARROW = auto()  # <~
-    NULL_COALESCE = auto()  # ??
     NO_MANGLE = auto()      # !! tell the compiler not to mangle this name at all for any reason.
 
     # SPECIAL
     FUNCTION_POINTER = auto() # {}*
     ADDRESS_CAST = auto()     # (@)
     STRINGIFY = auto()        # $
+    CODIFY = auto()           # ~$
     BITSLICE = auto()         # ``
     
     # Delimiters
@@ -264,7 +269,6 @@ triple_char_tokens = {
     '^^=': TokenType.XOR_ASSIGN,
     '{}*': TokenType.FUNCTION_POINTER,
     '(@)': TokenType.ADDRESS_CAST,
-    '<:-': TokenType.LAMBDA_ARROW,
     '...': TokenType.ELLIPSIS,
 } | triple_binary_tokens
 
@@ -303,7 +307,10 @@ double_char_tokens = {
     '..': TokenType.RANGE,
     '::': TokenType.SCOPE,
     '?=': TokenType.TERNARY_ASSIGN,
-    '``': TokenType.BITSLICE
+    '!?': TokenType.NOT_NULL,
+    '@=': TokenType.ADDRESS_ASSIGN,
+    '``': TokenType.BITSLICE,
+    '~$': TokenType.CODIFY
 } | double_binary_tokens
 
 # Single-character tokens dictionary
@@ -372,10 +379,13 @@ _TOKEN_TYPE_TO_STR: dict = {
     TokenType.DOUBLE_KW:  'double',
     TokenType.ELIF:       'elif',
     TokenType.ELSE:       'else',
+    TokenType.MACRO:      'macro',
     TokenType.ENUM:       'enum',
     TokenType.ESCAPE_KW:  'escape',
+    TokenType.EXPORT:     'export',
     TokenType.EXTERN:     'extern',
     TokenType.FALSE:      'false',
+    TokenType.FASTNODE:   'fastnode',
     TokenType.FLOAT_KW:   'float',
     TokenType.FOR:        'for',
     TokenType.FROM:       'from',
@@ -491,6 +501,7 @@ class FluxLexer:
             'compt': TokenType.COMPT,
             'const': TokenType.CONST,
             'continue': TokenType.CONTINUE,
+            'contract': TokenType.CONTRACT,
             'data': TokenType.DATA,
             'def': TokenType.DEF,
             'defer': TokenType.DEFER,
@@ -500,11 +511,14 @@ class FluxLexer:
             'double': TokenType.DOUBLE_KW,
             'elif': TokenType.ELIF,
             'else': TokenType.ELSE,
+            'macro': TokenType.MACRO,
             'endianof': TokenType.ENDIANOF,
             'enum': TokenType.ENUM,
             'escape': TokenType.ESCAPE_KW,
+            'export': TokenType.EXPORT,
             'extern': TokenType.EXTERN,
             'false': TokenType.FALSE,
+            'fastnode': TokenType.FASTNODE,
             'float': TokenType.FLOAT_KW,
             'from': TokenType.FROM,
             'for': TokenType.FOR,

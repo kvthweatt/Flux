@@ -2,6 +2,8 @@
 // Supports: init, print, copy, compare, add, subtract, multiply, divide, modulo, power, shift
 #import "standard.fx", "bigint.fx";
 
+using standard::io::console;
+
 // BigInt structure - stores large integers as arrays of u32 digits
 // Each u32 holds one "digit" in base 2^32
 // digits[0] is least significant, digits[length-1] is most significant

@@ -11,18 +11,17 @@
 #def FLUX_STANDARD_UUID 1;
 
 #ifndef FLUX_STANDARD_TYPES
-#import "redtypes.fx";
+#import "types.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_RANDOM
-#import "redrandom.fx";
+#import "random.fx";
 #endif;
 
 struct UUID
 {
     byte[16] bytes;
 };
-
 
 namespace standard
 {

@@ -1,3 +1,4 @@
+<a id="flux"></a>
 # Flux
 
 Flux is a compiled, general purpose programming language.
@@ -6,12 +7,99 @@ It provides power with ease of writing.
 
 If you like Flux, please consider contributing to the project or joining the [Flux Discord server](https://discord.gg/RAHjbYuNUc) where you can ask questions, provide feedback, and talk with other Flux enjoyers!
 
-**Creator note:** Everything in Flux is **stack allocated** unless specified.  
+**Creator note** Everything in Flux is **stack allocated** unless specified.  
 - This means you are likely to introduce stack overflows if you perform stack allocations inside loops such as declaring a new variable each time a loop passes.
 
 ---
 
-## **Functions:**
+## Table of Contents
+
+- [Flux](#flux)
+  - [Functions](#functions)
+  - [Importing with `import`](#importing-with-import)
+    - [Very simple preprocessor](#very-simple-preprocessor)
+  - [Namespaces](#namespaces)
+  - [Structs](#structs)
+    - [You can template structs by using angle brackets `<`,`>`](#you-can-template-structs-by-using-angle-brackets)
+  - [Objects](#objects)
+    - [Required methods](#required-methods)
+  - [Deferred object cleanup with `defer`](#deferred-object-cleanup-with-defer)
+  - [Traits](#traits)
+  - [Public/Private with Objects/Structs](#publicprivate-with-objectsstructs)
+  - [i-Strings and f-Strings](#istrings-and-fstrings)
+  - [Pointers](#pointers)
+  - [You can also use in-line assembly directly](#you-can-also-use-inline-assembly-directly)
+  - [Logic with if/elif/else](#logic-with-ifelifelse)
+  - [The `data` keyword](#the-data-keyword)
+    - [Mixing Signed/Unsigned in Expressions](#mixing-signedunsigned-in-expressions)
+  - [Endianness Handling](#endianness-handling)
+  - [Casting](#casting)
+  - [Stringification with `$`](#stringification-with)
+  - [Codification](#codification)
+  - [Direct type conversion](#direct-type-conversion)
+  - [The `typeof`, `sizeof`, `alignof`, and `endianof` built-ins](#the-typeof-sizeof-alignof-and-endianof-builtins)
+  - [`void` as a literal](#void-as-a-literal)
+  - [Arrays](#arrays)
+  - [Loops](#loops)
+  - [Single-initialized variables with `singinit`](#singleinitialized-variables-with-singinit)
+  - [Recursion](#recursion)
+  - [Strict Recursion with `<~`](#strict-recursion-with)
+  - [Escaping strict recursion with `escape`](#escaping-strict-recursion-with-escape)
+  - [Error handling with `try`/`throw`/`catch`](#error-handling-with-trythrowcatch)
+  - [Enumerated Lists](#enumerated-lists)
+  - [Unions](#unions)
+  - [Tagged unions](#tagged-unions)
+  - [Switching](#switching)
+  - [Namespace elimination with `!using` or `not using`](#namespace-elimination-with-using-or-not-using)
+  - [Deprecation with `deprecate`](#deprecation-with-deprecate)
+  - [Assertion with `assert()`](#assertion-with-assert)
+  - [Heap allocation](#heap-allocation)
+  - [Freeing from the heap](#freeing-from-the-heap)
+  - [Custom infix operators and overloading](#custom-infix-operators-and-overloading)
+  - [Functions and `contract`](#functions-and-contract)
+  - [Contracts on operators](#contracts-on-operators)
+  - [Expression-based macros with `macro`](#expressionbased-macros-with-macro)
+  - [Templates](#templates)
+  - [Templating operators](#templating-operators)
+  - [Combining templates, contracts, and operators](#combining-templates-contracts-and-operators)
+  - [Variadic functions](#variadic-functions)
+  - [Chaining Functions](#chaining-functions)
+  - [External Functions (FFI)](#external-functions-ffi)
+  - [Exporting Functions with `export`](#exporting-functions-with-export)
+  - [Advanced pointer manipulation](#advanced-pointer-manipulation)
+    - [Taking address of literals](#taking-address-of-literals)
+    - [Pointer to integer conversions](#pointer-to-integer-conversions)
+  - [Memory Layout and Alignment Tricks](#memory-layout-and-alignment-tricks)
+    - [Bit-Field Manipulation](#bitfield-manipulation)
+    - [Advanced data manipulation techniques](#advanced-data-manipulation-techniques)
+    - [Reworking a loop](#reworking-a-loop)
+    - [Bit slices](#bit-slices)
+    - [Taking bit slices from structs](#taking-bit-slices-from-structs)
+    - [Bit slices of bit slices](#bit-slices-of-bit-slices)
+  - [Advanced Data Type Features](#advanced-data-type-features)
+    - [Unusual Bit Widths](#unusual-bit-widths)
+  - [Function Pointers](#function-pointers)
+  - [Callbacks](#callbacks)
+  - [Raw bytecode functions](#raw-bytecode-functions)
+  - [Ownership with the tie operator `~`](#ownership-with-the-tie-operator)
+  - [Control Flow Edge Cases](#control-flow-edge-cases)
+    - [Nested Switches with Fallthrough](#nested-switches-with-fallthrough)
+    - [Complex Try/Catch with Multiple Types](#complex-trycatch-with-multiple-types)
+    - [Nested Loops with Break/Continue](#nested-loops-with-breakcontinue)
+    - [Simple Packet Parser](#simple-packet-parser)
+    - [Fixed-Point Math](#fixedpoint-math)
+  - [Type System Edge Cases](#type-system-edge-cases)
+    - [`void` semantics](#void-semantics)
+- [Calling Conventions](#calling-conventions)
+- [Keyword list](#keyword-list)
+- [Operator list](#operator-list)
+  - [Primitive types](#primitive-types)
+  - [All types](#all-types)
+  - [Preprocesor directives](#preprocesor-directives)
+
+
+<a id="functions"></a>
+## **Functions**
 
 You cannot define a function within a function. They must be module, namespace, or object level.
 
@@ -49,6 +137,584 @@ Overloading example:
 def myAdd(float x, float y) -> float
 {
     return x + y;
+};
+```
+
+---
+
+<a id="importing-with-import"></a>
+## **Importing with `import`**
+
+Any file you import will take the place of the import statement.
+
+```
+#import "standard.fx";
+#import "mylib.fx", "foobar.fx";  // Multi-line imports are processed from left to right in the order they appear.
+```
+
+Example:  
+**`somefile.fx`**
+
+```
+int myVar = 10;
+```
+
+**`main.fx`**
+
+```
+#import "somefile.fx";  // int myVar = 10;
+
+def main() -> int
+{
+    if (myVar < 20)
+    {
+        // Do something ...
+    };
+    return 0;
+};
+```
+
+<a id="very-simple-preprocessor"></a>
+### Very simple preprocessor
+```
+#import "standard.fx";
+
+#ifdef __WINDOWS__
+#def DEFAULT_CONFIG_FLAG 0x4000;
+#else
+#ifdef __LINUX__
+#def DEFAULT_CONFIG_FLAG 0x8000;
+#endif;
+#endif;
+
+#warn "This will show a warning message.";
+
+#stop "This will hard-stop compilation.";
+
+#dir "C:\\path\\to\\some\\lib";
+// Adds a path to the preprocessor's search list
+```
+
+`#def` defines a preprocessor constant. This is not a functional macro, just a replacement.
+
+---
+
+<a id="namespaces"></a>
+## **Namespaces**
+
+Prototype: `namespace myNamespace;`
+Definition: `namespace myNamespace {};`  
+Scope access: `myNamespace::myMember;`
+
+Example:
+
+```
+namespace myNamespace
+{
+    def myFoo() -> void; // Legal
+};
+
+namespace myNamespace
+{
+    def myBar() -> void;        // namespace myNamespace now has myFoo() and myBar()
+};
+
+namespace myNamespace
+{
+    namespace myNestedNamespace
+    {
+        def myFooBar() -> void;
+    };
+};
+```
+
+Duplicate namespace definitions do not redefine the namespace, the members of both combine as if they were one namespace. This is so the standard library or any library can have a core namespace across multiple files.  
+Namespaces are the only container that have this functionality.
+
+---
+
+<a id="structs"></a>
+## **Structs**
+
+Prototype / forward declaration: `struct myStruct;`  
+Definition: `struct myStruct {int x,y,z;};`  
+Instance: `myStruct newStruct;`  
+Instance with assignment: `myStruct newStruct {x = 10, y = 20, z = -5};`  
+Member access: `newStruct.x;`
+
+Structs are packed and have no padding naturally. There is no way to change this.  
+You set up padding with alignment in your data types.  
+Members of structs are aligned and tightly packed according to their width unless the types have specific alignment.  
+Structs are non-executable, and therefore cannot contain functions or objects.  
+Placing a for, do/while, if/elif/else, try/catch, or any executable statements other than variable declarations will result in a compilation error.
+
+Example:
+
+```
+struct xyzStruct
+{
+    int x,y,z;
+};
+
+struct newStruct
+{
+    xyzStruct myStruct {x = 1, y = 1, z = 1};              // structs can contain structs
+};
+```
+
+Structs are non-executable.  
+Structs cannot contain functions, or objects. This includes prototypes and definitions. Pointers are ok, including function pointers.  
+
+Structs support composition via prepending and appending other structs. Example:
+```
+struct Header
+{
+    data{16} sig;
+    data{32} filesize, reserved, dataoffset;
+};
+
+struct InfoHeader
+{
+    data{32} size, width, height;
+    data{16} planes, bitsperpixel;
+    data{32} compression, imagesize, xpixelsperm, ypixelsperm, colorsused, importantcolors;
+};
+
+struct ExtraData
+{
+    byte[64] author;
+};
+
+struct BMP : Header, InfoHeader
+{
+    // More bitmap fields
+} : ExtraData;
+```
+
+<a id="you-can-template-structs-by-using-angle-brackets"></a>
+### You can template structs by using angle brackets `<`,`>`:
+```
+struct myStru<A,B>
+{
+    A ax, ay, az;
+    B bx, by, bz;
+};
+```
+Composition and templates can be combined, however they **will** shadow.
+```
+struct myStru1<A,B>
+{
+    A a1x, a1y;
+    B b1x, b1y;
+};
+
+struct myStru2<A,B,C> : myStru1
+{
+    A a2x, a2y, a2z;
+    B b2x, b2y, b2z;
+};
+
+// Becomes,
+
+struct myStru2<A,B,C>
+{
+    A a1x, a1y;
+    B b1x, b1y;
+    A a2x, a2y, a2z;
+    B b2x, b2y, b2z;
+};
+```
+If you intended for `a1x` to be a different type than `a2x`, you must use different parameter names.
+
+Structs cannot contain objects, but objects can contain structs. This means struct template parameters cannot be `object` type.
+
+---
+
+<a id="objects"></a>
+## **Objects**
+
+Prototype / forward declaration: `object myObj;`  
+Definition: `object myObj {};`  
+Instance: `myObj newObj();`  
+Member access: `newObj.x`
+
+Objects are functional with behavior and are "executable" as opposed to structs which are pure data-only.
+
+**Object Methods**  
+`this` never needs to be a parameter as it is always local to its object.
+
+<a id="required-methods"></a>
+### Required methods:
+```
+__init()       -> this               Example: thisObj newObj();            // Constructor
+__exit()       -> void               Example: newObj.__exit();             // Destructor
+__expr()       -> any
+```
+
+`__init` is always called on object instantiation.  
+`__exit` called manually to destroy the object.
+`__expr` is the instance's expression context method. This method cannot take arguments.
+
+If an object's `__init` method takes **only one parameter**, you may instance it like sO:
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+object SomeOBJ
+{
+    int val;
+
+    def __init(int x) -> this { return this; };
+
+    def __exit() -> void {};
+
+    def __expr() -> int { return this.val; };
+};
+
+def main() -> int
+{
+    SomeOBJ sobj = 5;
+
+    println(sobj.val);   // Direct access
+
+    println(sobj);  // Compiler detects object instance, emits print(sobj.__expr());
+
+    println(sobj + sobj); // 10
+
+    return 0;
+};
+```
+It is syntactic sugar for `SomeObj sobj(5);`
+
+<a id="deferred-object-cleanup-with-defer"></a>
+## Deferred object cleanup with `defer`:
+Deferred statements execute in LIFO order.  
+Deferred calls execute after post-contract code, immediately before the function returns.
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+object SomeOBJ
+{
+    int val;
+    def __init(int x) -> this
+    {
+        this.val = x;
+        return this;
+    };
+
+    def __exit() -> void { print("Cleaning up!"); };
+
+    def __expr() -> int { return this.val; };
+};
+
+def main() -> int
+{
+    SomeOBJ sobj = 5;
+    defer sobj.__exit();
+
+    print(sobj);
+    // deferred statements injected here
+    return 0;
+};
+```
+
+### You can also defer in blocks:
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+def main() -> int
+{
+    println("Hello!");
+    defer
+    {
+        println("Test1!");
+        println("Test2!");
+    };
+    return 0;
+};
+```
+Result:
+```
+Hello!
+Test2!
+Test1!
+```
+
+---
+
+<a id="traits"></a>
+## Traits
+Traits are contracts imposed on objects dictating they __must__ implement the defined prototypes.
+```
+trait Drawable
+{
+    def draw() -> void;
+};
+
+
+// Implementation
+Drawable object myObj
+{
+    // ... required methods ...
+
+    def draw() -> void
+    {
+        // Implementation code, if the block is empty the compiler throws an error.
+        return void;
+    };
+
+    // ... other methods ...
+};
+```
+
+---
+
+
+<a id="publicprivate-with-objectsstructs"></a>
+## **Public/Private with Objects/Structs**  
+Struct public and private works by only allowing access to private sections by the parent object/struct that "owns" the struct.  
+The struct is still data where public members are visible anywhere, but its private members are only visible/modifiable by the object immediately containing it.
+
+```
+struct myStruct
+{
+    int x, y;
+};
+
+object Obj2
+{
+    private
+    {
+        myStruct objStru;
+    };
+
+    // ... required methods ...
+
+    def get_y() -> int
+    {
+        return this.myStruct.y;             // Safe - Access is in the same scope (immediate `this` Obj2, not `super` Obj1)
+    };
+};
+
+object Obj1
+{
+
+    Obj2 myObject;
+
+    // ... required methods ...
+
+    def foo() -> int
+    {
+        return this.myObject.myStruct.y;    // ERROR - Need to use a getter of Obj2
+    };
+};
+```
+
+---
+
+<a id="istrings-and-fstrings"></a>
+## **i-Strings and f-Strings**
+
+The syntax in Flux would be: `i"{}{}{}":{x;y;z;};` for an i-string, and `f"{var1}{var2}\0";` for an f-string.
+
+The brackets are replaced with the results of the statements in order respective to the statements' position in the statement array in i-strings.  
+**i-string Example**
+
+```
+#import "standard.fx"; // imports types.fx
+
+using standard::io::console;
+
+def bar() -> noopstr { return "World"; };    // We get the non-OOP string type from the types library
+
+def main() -> int
+{
+    println(i"Hello {} {}" : {bar() + "!"; "test";});
+
+    x = i"Bar {}":{bar()};     // "Bar World!"
+
+    noopstr a = "Hello", b = "World!",
+            c = f"{a} {b}";    / "Hello World!"
+
+    println(c);
+
+    return 0;
+};
+```
+
+This allows you to write clean interpolated strings without strange formatting.  
+**f-string Example**
+```
+#import "standard.fx";
+
+using standard::io::console,
+      standard::strings;
+
+def main() -> int
+{
+    string h = "Hello";
+    string w = "World!";
+    print(f"{h} {w}");
+    return 0;
+};
+```
+`Result: Hello World!`
+
+---
+
+<a id="pointers"></a>
+## **Pointers**
+
+```
+string a = "Test\0";
+string* pa = @a;
+*pa += "ing!\0";
+print(a);
+// Result: "Testing!"
+
+
+// Pointers to variables:
+int idata = 0;
+int* p_idata = @idata;
+
+*p_idata += 3;
+print(idata);  // 3
+
+// Function pointer declarations
+def{}* p_add(int,int)->int = @add;
+def{}* p_sub(int,int)->int = @sub;
+
+// Must dereference to call
+print(p_add(0,3)); // 3
+print(p_sub(5,2)); // 3
+
+// Pointers to objects, structs, arrays:
+object    myObj {};                 // Definition
+object* p_myObj = @myObj;           // Pointer
+
+struct    myStruct {};              // Definition
+struct* p_myStruct = @myStruct;     // Pointer
+
+int*[] pi_array = @i_array;         // Array of pointer
+
+const int*  px; // Pointer to const value
+
+const* int* px; // Constant pointer to int pointer
+```
+
+---
+
+<a id="you-can-also-use-inline-assembly-directly"></a>
+## You can also use in-line assembly directly:
+Assembly in Flux is done AT&T style.  
+The constraints follow the block in the pattern `outputs : inputs : clobbers`
+Here's an example:
+```
+def _exchange64(i64* ptr, i64 value, i64* out) -> void
+{
+    #ifdef __ARCH_X86_64__
+    volatile asm
+    {
+        movq $0, %rsi
+        movq $2, %rdi
+        movq $1, %rax
+        xchgq %rax, (%rsi)
+        movq %rax, (%rdi)
+    } : : "r"(ptr), "r"(value), "r"(out) : "rax", "rsi", "rdi", "memory";
+    #endif;
+    #ifdef __ARCH_ARM64__
+    volatile asm
+    {
+    .retry_xchg64:
+        ldaxr x0, [$0]
+        stlxr w3, x1, [$0]
+        cbnz  w3, .retry_xchg64
+        str   x0, [$2]
+    } : : "r"(ptr), "r"(value), "r"(out) : "x0", "w3", "memory";
+    #endif;
+};
+```
+Here, the clobber list is `"r"(ptr), "r"(value), "r"(out) : "x0", "w3", "memory";`  
+Using `volatile` tags the assembly block for the compiler, saying do not touch this for any reason.
+
+---
+
+<a id="logic-with-ifelifelse"></a>
+## **Logic with if/elif/else**
+```
+if (condition1)
+{
+    doThis();
+}
+elif (condition2)      // You can also use `else if`
+{
+    doThat();
+}
+else if (condition 3)  // Equivalent to `elif`
+{
+    doAnythingElse();
+}
+else
+{
+    doThings();
+};
+```
+
+You can also do `if` expressions:
+```
+int x = 0;
+int y = x if (x > 5) else noinit;
+```
+Alternatively, you can use a ternary `?:`
+`int y = x ?  (x > 5) :   noinit;`
+
+You can also use `if` expressions in the following manner:
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+def foo() -> int
+{
+    return 10;
+};
+
+def main() -> int
+{
+    int* px @= 5;
+
+    print(foo()) if (px);
+
+    return 0;
+};
+```
+You may also use groups of statements in a block before an if:
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+def foo() -> int
+{
+    print("Hello");
+};
+def bar() -> void
+{
+    print(" World!");
+};
+
+def main() -> int
+{
+    {
+        foo(); bar();
+    } if (true);
+
+    return 0;
 };
 ```
 
@@ -112,523 +778,10 @@ def main() -> int
 };
 ```
 
-Chain functions:
-```
-def foo(int x) -> int
-{
-    return x / 2;
-};
-
-def bar () -> int
-{
-    return 0xFF;
-};
-
-int z = foo() <- bar(); // == // int z = foo(bar());
-```
-
 ---
 
-## **Importing with `import`:**
-
-Any file you import will take the place of the import statement.
-
-```
-#import "standard.fx";
-#import "mylib.fx", "foobar.fx";  // Multi-line imports are processed from left to right in the order they appear.
-```
-
-Example:  
-**`somefile.fx`**
-
-```
-int myVar = 10;
-```
-
-**`main.fx`**
-
-```
-#import "somefile.fx";  // int myVar = 10;
-
-def main() -> int
-{
-    if (myVar < 20)
-    {
-        // Do something ...
-    };
-    return 0;
-};
-```
-
-### Very simple preprocessor
-```
-#import "standard.fx";
-
-#ifdef __WINDOWS__
-def some_win_generic() -> LPCSTR*;
-#else
-#ifdef __LINUX__
-def some_nix_generic() -> void*;
-#endif;
-#endif;
-
-#warn "This will show a warning message.";
-
-#stop "This will hard-stop compilation.";
-
-#dir "C:\\path\\to\\some\\lib";
-// Adds a path to the preprocessor's search list
-```
-
----
-
-## **External Functions (FFI):**
-Single-line:
-```
-extern def foo() -> void;
-extern def !!foo() -> void;  // !! tells the compiler do not mangle this function name
-```
-Block-based:
-```
-extern
-{
-    def foo() -> void;
-    def bar() -> void;
-    def !!zed() -> void;
-};
-```
-Or multiple prototypes at once:
-```
-extern
-{
-    // Memory allocation
-    def !!
-        malloc(size_t) -> void*,
-        memcpy(void*, void*, size_t) -> void*,
-        free(void*) -> void,
-        calloc(size_t, size_t) -> void*,
-        realloc(void*, size_t) -> void*,
-        memcpy(void*, void*, size_t) -> void*,
-        memmove(void*, void*, size_t) -> void*,
-        memset(void*, int, size_t) -> void*,
-        memcmp(void*, void*, size_t) -> int,
-        abort() -> void,
-        exit(int) -> void,
-        atexit(void*) -> int;
-};
-```
-String-literal based function name support to target any compiled library function:
-```
-def "??foo@"()->void;
-```
-
-## **Namespaces:**
-
-Prototype: `namespace myNamespace;`
-Definition: `namespace myNamespace {};`  
-Scope access: `myNamespace::myMember;`
-
-Example:
-
-```
-namespace myNamespace
-{
-    def myFoo() -> void; // Legal
-};
-
-namespace myNamespace
-{
-    def myBar() -> void;        // namespace myNamespace now has myFoo() and myBar()
-};
-
-namespace myNamespace
-{
-    namespace myNestedNamespace
-    {
-        def myFooBar() -> void;
-    };
-};
-```
-
-Duplicate namespace definitions do not redefine the namespace, the members of both combine as if they were one namespace. This is so the standard library or any library can have a core namespace across multiple files.  
-Namespaces are the only container that have this functionality.
-
----
-
-## **Objects:**
-
-Prototype / forward declaration: `object myObj;`  
-Definition: `object myObj {};`  
-Instance: `myObj newObj();`  
-Member access: `newObj.x`
-
-**Object Methods:**  
-`this` never needs to be a parameter as it is always local to its object.
-
-```
-__init()       -> this               Example: thisObj newObj();            // Constructor
-__exit()       -> void               Example: newObj.__exit();             // Destructor
-```
-
-`__init` is always called on object instantiation.  
-`__exit` called manually to destroy the object.
-
-If an object's `__init` method takes **only one parameter**, you may instance it like sO:
-```
-object SomeOBJ
-{
-    def __init(int) -> this { return this; };
-
-    def __exit() -> void {};
-};
-
-SomeOBJ sobj = 5;
-```
-It is syntactic sugar for `SomeObj sobj(5);`
-
----
-
-## Traits
-Traits are contracts imposed on objects dictating they __must__ implement the defined prototypes.
-```
-trait Drawable
-{
-    def draw() -> void;
-};
-
-
-// Implementation
-Drawable object myObj
-{
-    def draw() -> void
-    {
-        // Implementation code, if the block is empty the compiler throws an error.
-        return void;
-    };
-
-    // ... other methods ...
-};
-```
-
----
-
-## **Structs:**
-
-Prototype / forward declaration: `struct myStruct;`  
-Definition: `struct myStruct {int x,y,z;};`  
-Instance: `myStruct newStruct;`  
-Instance with assignment: `myStruct newStruct {x = 10, y = 20, z = -5};`  
-Member access: `newStruct.x;`
-
-Structs are packed and have no padding naturally. There is no way to change this.  
-You set up padding with alignment in your data types.  
-Members of structs are aligned and tightly packed according to their width unless the types have specific alignment.  
-Structs are non-executable, and therefore cannot contain functions or objects.  
-Placing a for, do/while, if/elif/else, try/catch, or any executable statements other than variable declarations will result in a compilation error.
-
-Example:
-
-```
-struct xyzStruct
-{
-    int x,y,z;
-};
-
-struct newStruct
-{
-    xyzStruct myStruct {x = 1, y = 1, z = 1};              // structs can contain structs
-};
-```
-
-Structs are non-executable.  
-Structs cannot contain functions, or objects. This includes prototypes and definitions. Pointers are ok, including function pointers.  
-
-Structs support composition via prepending and appending other structs. Example:
-```
-struct Header
-{
-    data{16} sig;
-    data{32} filesize, reserved, dataoffset;
-};
-
-struct InfoHeader
-{
-    data{32} size, width, height;
-    data{16} planes, bitsperpixel;
-    data{32} compression, imagesize, xpixelsperm, ypixelsperm, colorsused, importantcolors;
-};
-
-struct ExtraData
-{
-    byte[64] author;
-};
-
-struct BMP : Header, InfoHeader
-{
-    // More bitmap fields
-} : ExtraData;
-```
-
-
----
-
-Objects are functional with behavior and are executable.  
-Structs cannot contain objects, but objects can contain structs. This means struct template parameters cannot be objects.
-
-## **Public/Private with Objects/Structs:**  
-Struct public and private works by only allowing access to private sections by the parent object/struct that "owns" the struct.  
-The struct is still data where public members are visible anywhere, but its private members are only visible/modifiable by the object immediately containing it.
-
-```
-object Obj1
-{
-    object Obj2
-    {
-        struct myStruct
-        {
-            public
-            {
-                int x = 10;
-            };
-
-            private
-            {
-                int y = 100;
-            };
-        };
-
-        myStruct.y;                  // Safe - Access is in the same scope (immediate `this` Obj2, not `super` Obj1)
-    };
-
-    Obj2 myObject;
-
-    myObject.myStruct.y;             // ERROR - Need to use a public getter of Obj2
-};
-```
-
----
-
-## **Enumerated Lists:**
-
-Definition: `enum myEnum {val1, val2, val3, val4, ...};`  
-Instance: `myEnum newEnum;`
-Member access: `newEnum.val1;`
-
-Enumerated lists are type `int`, but in a later update when full RTTI is added to Flux there will be more specification around enums and type sizes.
-
----
-
-## **Unions:**
-
-Prototype: `union myUnion;`  
-Definition: `union myUnion {int iVal; float fVal;};`  
-Insance: `myUnion newUnion;`  
-Instance with assignment: `myUnion newUnion {iVal = 10};`  
-Member access: `newUnion.iVal;`
-
-Unions are similar to structs, the difference is only one of its members can be initialized at any time.  
-Initializing another member changes the actively initialized member.  
-Attempting to access an uninitialized member results in undefined behavior.
-
-Example:
-
-```
-union myUnion
-{
-    int iVal;
-    float fVal;
-};
-
-myUnion u {iVal = 10};
-
-def main() -> int
-{
-    u.iVal = 10;   // iVal is the active member
-    u.fVal = 3.14; // iVal overwritten by fVal in memory
-};
-```
-
----
-
-## **i-Strings and f-Strings:**
-
-The syntax in Flux would be: `i"{}{}{}":{x;y;z;};` for an i-string, and `f"{var1}{var2}\0";` for an f-string.
-
-The brackets are replaced with the results of the statements in order respective to the statements' position in the statement array in i-strings.  
-**i-string Example:**
-
-```
-#import "standard.fx";
-
-using standard::io::console;
-
-unsigned data{8}[] as string;
-
-def bar() -> string { return "World\0"; };    // We get the basic string type from the types module
-print(i"Hello {} {}" : // whitespace is ignored
-              {
-                  bar() + "!\0";
-                "test\0";
-              }                             // Whitespace is ignored, this is just for positioning
-     );
-x = i"Bar {}":{bar()};                      // "Bar World!"
-
-string a = "Hello", b = "World!\0";
-string y = f"{a} {b}\0";                      // "Hello World!"
-```
-
-This allows you to write clean interpolated strings without strange formatting.  
-**f-string Example:**
-
-```
-#import "standard.fx";
-
-using standard::io::console;
-using standard::strings;
-
-def main() -> int
-{
-    string h = "Hello\0";
-    string w = "World!\0";
-    print(f"{h} {w}\0");
-    return 0;
-};
-```
-
-`Result: Hello World!`
-
----
-
-## **Pointers:**
-
-```
-string a = "Test\0";
-string* pa = @a;
-*pa += "ing!\0";
-print(a);
-// Result: "Testing!"
-
-
-// Pointers to variables:
-int idata = 0;
-int* p_idata = @idata;
-
-*p_idata += 3;
-print(idata);  // 3
-
-// Function pointer declarations
-def{}* p_add(int,int)->int = @add;
-def{}* p_sub(int,int)->int = @sub;
-
-// Must dereference to call
-print(p_add(0,3)); // 3
-print(p_sub(5,2)); // 3
-
-// Pointers to objects, structs, arrays:
-object    myObj {};                 // Definition
-object* p_myObj = @myObj;           // Pointer
-
-struct    myStruct {};              // Definition
-struct* p_myStruct = @myStruct;     // Pointer
-
-int[]* pi_array = @i_array;         // Array of pointer
-
-const* int x;  // Constant pointer
-
-const* int* x; // Constant pointer to int pointer
-
-// Pointer Arithmetic:
-#import "standard.fx";
-
-using standard::io::console;
-
-def main() -> int
-{
-    int[] arr = [10, 20, 30, 40, 50];
-    int[]* ptr = @arr;                         // ptr points to the first element of arr
-
-    print(f"Value at ptr: {*ptr}\0");            // Output: 10
-
-    ptr++;    // Increment ptr to point to the next element
-    print(f"Value at ptr: {*ptr}\0");            // Output: 20
-
-    ptr += 2; // Increment ptr by 2 positions
-    print(f"Value at ptr: {*ptr}\0");            // Output: 40
-
-    int* ptr2 = @arr[4]; // ptr2 points to the last element of arr
-    print(f"Elements between ptr and ptr2: {ptr2 - ptr}\0"); // Output: 1
-
-    return 0;
-};
-```
-
----
-
-## You can also use in-line assembly directly:
-Assembly in Flux is done AT&T style.  
-The constraints follow the block in the pattern `outputs : inputs : clobbers`
-Here's an example:
-```
-def _exchange64(i64* ptr, i64 value, i64* out) -> void
-{
-    #ifdef __ARCH_X86_64__
-    volatile asm
-    {
-        movq $0, %rsi
-        movq $2, %rdi
-        movq $1, %rax
-        xchgq %rax, (%rsi)
-        movq %rax, (%rdi)
-    } : : "r"(ptr), "r"(value), "r"(out) : "rax", "rsi", "rdi", "memory";
-    #endif;
-    #ifdef __ARCH_ARM64__
-    volatile asm
-    {
-    .retry_xchg64:
-        ldaxr x0, [$0]
-        stlxr w3, x1, [$0]
-        cbnz  w3, .retry_xchg64
-        str   x0, [$2]
-    } : : "r"(ptr), "r"(value), "r"(out) : "x0", "w3", "memory";
-    #endif;
-};
-```
-Here, the clobber list is `"r"(ptr), "r"(value), "r"(out) : "x0", "w3", "memory";`  
-Using `volatile` tags the assembly block for the compiler, saying do not touch this for any reason.
-
----
-
-## **Logic with if/elif/else:**
-```
-if (condition1)
-{
-    doThis();
-}
-elif (condition2)      // You can also use `else if`
-{
-    doThat();
-}
-else if (condition 3)  // Equivalent to `elif`
-{
-    doAnythingElse();
-}
-else
-{
-    doThings();
-};
-```
-
-You can also do `if` expressions:
-```
-int x = 0;
-int y = x if (x > 5) else noinit;
-```
-Alternatively, you can use a ternary `?:`
-`int y = x ?  (x > 5) :   noinit;`
-
----
-
-## **The `data` keyword:**
+<a id="the-data-keyword"></a>
+## **The `data` keyword**
 
 Data is a variable bit width, primitive binary data-type creation keyword.  
 Anything can cast to it, and it can cast to any primitive like char, int, float.  
@@ -658,18 +811,75 @@ You can pun and declare a variable as well:
 
 Data decays to an integer type under the hood. All data is binary, and is therefore an integer.
 
-**Minimal specification:**
+**Minimal specification**
 `unsigned data{8} as byte;            // 8-bit`
 
-**Full specification:**
+**Full specification**
 `data{width : alignment : endianness}`
 
-**Example:**
+**Example**
 `unsigned data{16::0} as custom_le;   // 16-bit, 16-bit aligned, little endian`
 
 ---
 
-## **Casting:**
+<a id="mixing-signedunsigned-in-expressions"></a>
+### Mixing Signed/Unsigned in Expressions
+```
+signed data{32} as i32;
+unsigned data{32} as u32;
+
+i32 a = -10;
+u32 b = 20;
+
+// Mixed arithmetic (result type determined by widest type)
+i32 result1 = a + (i32)b;    // -10 + 20 = 10 (signed)
+u32 result2 = (u32)a + b;    // 4294967286 + 20 (unsigned, wraps)
+
+// Comparison with mixed signs
+if (a < (i32)b)  // true: -10 < 20
+{
+    print("Signed comparison\0");
+};
+
+if ((u32)a < b)  // false: 4294967286 > 20
+{
+    print("Unsigned comparison\0");
+};
+```
+
+---
+
+<a id="endianness-handling"></a>
+## **Endianness Handling**
+```
+data{16::0} as le16;  // Little-endian 16-bit
+data{16}    as be16;  // Big-endian default 16-bit
+
+def swap_endian_16(be value) -> data{16}
+{
+    data{16::0} v2 = value; // Explicit byte swap on assignment
+    return v2;
+};
+
+// Network byte order (big-endian) to host (little-endian)
+def network_to_host(be16 net_value) -> le16
+{
+    le16 x = net_value;     // Explicit byte swap on assignment
+    return x;
+};
+
+// Reading from network buffer
+data{8::0}[4] buf = [0x12, 0x34, 0x56, 0x78];
+be16[2] net = buf; // autopack and convert endianness
+```
+
+1. Single-endian arithmetic model - All math is performed in one endianness (big).
+2. Swapping on assignment means the compiler doesn't need to track mixed-endian states through complex expressions.
+
+---
+
+<a id="casting"></a>
+## **Casting**
 
 Casting in Flux is C-like
 
@@ -683,7 +893,7 @@ Casting anything to `void` is the functional equivalent of freeing the memory oc
 This is dangerous on purpose, it is equivalent to free(ptr) in C. This syntax is considered explicit in Flux once you understand the convention.  
 It calls `ffree()` under the hood, which uses the standard heap allocator. You should not `void` cast free anything unless it was allocated with `fmalloc()`
 
-**Void casting in relation to the stack and heap:**
+**Void casting in relation to the stack and heap**
 ```
 def example() -> void {
     int stackVar = 42; // Stack allocated
@@ -696,7 +906,8 @@ In this case, `stackVar` is zeroed out and the reference invalidated.
 
 ---
 
-## Stringification:
+<a id="stringification-with"></a>
+## Stringification with `$`:
 ```
 #import "standard.fx";
 
@@ -713,8 +924,30 @@ def main() -> int
 Result:
 `Hello`
 
+<a id="codification"></a>
+## Codification:
+Codification is the inverse of stringification, using the codify operator `~$`
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+def main() -> int
+{
+    byte* test = "int x = 5;";
+
+    ~$test;
+
+    println(x);
+    
+    return 0;
+};
+```
+Result: `5`
+
 ---
 
+<a id="direct-type-conversion"></a>
 ## Direct type conversion:
 You can do function-like conversion only with built-in types like `int`, `long`, `double`, `bool`, etc.
 ```
@@ -738,32 +971,8 @@ Result:
 
 ---
 
-## **types.fx module:**
-
-Imported by `standard.fx`
-```
-// The standard types found in Flux that are not included keywords
-// This is an excerpt and not a complete list of all types defined in the standard library of types
-signed   data{32} as  i32;
-unsigned data{32} as ui32;
-signed   data{64} as  i64;
-unsigned data{64} as ui64;
-```
-
-Note: `data` primitives are **unsigned by default.**
-`data{30} as my30t;` is identical to `unsigned data{30} as my30t;`
-
----
-
-## **Namespace elimination with `!using` or `not using`:**
-```
-!using standard::io::file;
-not using some::specific::namespace;
-```
-
----
-
-## **The `typeof`, `sizeof`, `alignof`, and `endianof` built-ins:**
+<a id="the-typeof-sizeof-alignof-and-endianof-builtins"></a>
+## **The `typeof`, `sizeof`, `alignof`, and `endianof` built-ins**
 ```
 data{8:8:0}* as lestr;
 signed data{13:16} as strange;
@@ -781,7 +990,8 @@ endianof(strange); // 1
 
 ---
 
-## **`void` as a literal:**
+<a id="void-as-a-literal"></a>
+## **`void` as a literal**
 ```
 if (x == void) {...code...};    // If it's nothing, do something
 void x;
@@ -791,9 +1001,29 @@ In literal context, `void` is `0`. `false` is also `0`, which means `void == fal
 
 ---
 
-## **Arrays:**
+<a id="arrays"></a>
+## **Arrays**
 
-**Static array comprehension:**
+Array declarations have the syntax `type[n] var`. Never `type var[n]`.
+
+A single dimension array: `int[] x = [1,2,3,4,5];`
+A two dimensional array: `int[][] y = [[1,2,3,4],[5,6,7,8]];`
+A three dimensional array:
+```
+int[][][] z = [
+                [
+                  [ 1,  2,  3], [ 4,  5,  6], [ 7,  8,  9]
+                ],
+                [
+                  [10, 11, 12], [13, 14, 15], [16, 17, 18]
+                ],
+                [
+                  [19, 20, 21], [22, 23, 24], [25, 26, 27]
+                ]
+              ];
+```
+
+**Static array comprehension**
 ```
 // Python-style comprehension
 int[10] squares = [x ^ 2 for (int x in 1..10)];
@@ -811,7 +1041,7 @@ int[10] squares = [x ^ 2 for (int x = 1; x <= 10; x++)];
 int[20] events = [x for (int x= 1; x <= 20; x++) if (x % 2 == 0)];
 ```
 
-**Static array comprehension using a dynamic type:**
+**Static array comprehension using a dynamic type**
 ```
 #import "standard.fx";
 
@@ -822,7 +1052,8 @@ Array[] myArr = [x.name for (Array x in oldArr) if (x.name.len() > 5)];
 
 ---
 
-## **Loops:**
+<a id="loops"></a>
+## **Loops**
 
 Flux supports 2 styles of for loops:
 ```
@@ -877,21 +1108,8 @@ while (1)
 
 ---
 
-## Recursion:
-```
-def rsub(int x, int y) -> int
-{
-    switch (x == 0 | y == 0)
-    {
-    };
-
-    rsub(--x,--y);
-};
-```
-
----
-
-## **Single-initialized variables with `singinit`:**
+<a id="singleinitialized-variables-with-singinit"></a>
+## **Single-initialized variables with `singinit`**
 ```
 #import "standard.fx";
 
@@ -918,6 +1136,24 @@ def main() -> int
 };
 ```
 
+---
+
+<a id="recursion"></a>
+## Recursion:
+```
+def rsub(int x, int y) -> int
+{
+    switch (x == 0 | y == 0)
+    {
+    };
+
+    rsub(--x,--y);
+};
+```
+
+---
+
+<a id="strict-recursion-with"></a>
 ## Strict Recursion with `<~`:
 Functions that have the recurse return operator will always return to themselves. Their stack frame never grows because they become tail calls, and get optimized as such.
 ```
@@ -950,7 +1186,8 @@ def main() -> int
 };
 ```
 
-## **Escaping strict recursion with `escape`:**
+<a id="escaping-strict-recursion-with-escape"></a>
+## **Escaping strict recursion with `escape`**
 `escape` can only be used inside a strictly-recursive function defined with a recurse arrow `<~`. Example:
 ```
 def recurse2() <~ void
@@ -964,7 +1201,8 @@ def recurse2() <~ void
 
 ---
 
-## **Error handling with `try`/`throw`/`catch`:**
+<a id="error-handling-with-trythrowcatch"></a>
+## **Error handling with `try`/`throw`/`catch`**
 ```
 unsigned data{8}[] as string;  // Basic string implementation with no functionality (non-OOP string)
 
@@ -1037,7 +1275,54 @@ def main() -> int
 };
 ```
 
-## **Tagged unions:**
+---
+
+<a id="enumerated-lists"></a>
+## **Enumerated Lists**
+
+Definition: `enum myEnum {val1, val2, val3, val4, ...};`  
+Instance: `myEnum newEnum;`
+Member access: `newEnum.val1;`
+
+Enumerated lists are type `int`, this will be updated to support `type enum Ident {};` syntax.
+
+---
+
+<a id="unions"></a>
+## **Unions**
+
+Prototype: `union myUnion;`  
+Definition: `union myUnion {int iVal; float fVal;};`  
+Insance: `myUnion newUnion;`  
+Instance with assignment: `myUnion newUnion {iVal = 10};`  
+Member access: `newUnion.iVal;`
+
+Unions are similar to structs, the difference is only one of its members can be initialized at any time.  
+Initializing another member changes the actively initialized member.  
+Attempting to access an uninitialized member results in garbage data for that member.
+
+Example:
+
+```
+union myUnion
+{
+    int iVal;
+    float fVal;
+};
+
+myUnion u {iVal = 10};
+
+def main() -> int
+{
+    u.iVal = 10;   // iVal is the active member
+    u.fVal = 3.14; // iVal overwritten by fVal in memory
+};
+```
+
+---
+
+<a id="tagged-unions"></a>
+## **Tagged unions**
 ```
 #import "standard.fx";
 
@@ -1116,7 +1401,8 @@ def main() -> int
 
 ---
 
-## **Switching:**
+<a id="switching"></a>
+## **Switching**
 `switch` is static, value-based, and non-flexible. Switch statements are for speed.
 ```
 switch (e)
@@ -1138,7 +1424,17 @@ switch (e)
 
 ---
 
-## **Deprecation with `deprecate`:**
+<a id="namespace-elimination-with-using-or-not-using"></a>
+## **Namespace elimination with `!using` or `not using`**
+```
+!using standard::io::file;
+not using some::specific::namespace;
+```
+
+---
+
+<a id="deprecation-with-deprecate"></a>
+## **Deprecation with `deprecate`**
 ```
 #import "standard.fx";
 
@@ -1167,16 +1463,17 @@ Function call test1__test2__foo()
 
 ---
 
-## **Assertion with `assert()`:**
+<a id="assertion-with-assert"></a>
+## **Assertion with `assert()`**
 `assert` automatically performs `throw` if the condition is false if it's inside a try/catch block,
 otherwise it automatically writes to standard error output.
 ```
 def main() -> int
 {
-    int x = 0;
+    int x;
     try
     {
-        assert(x == 0, "Something is fatally wrong with your computer.\0");
+        assert(x == 0, "Something is fatally wrong with your computer.");
     }
     catch (string e)
     {
@@ -1189,14 +1486,8 @@ def main() -> int
 
 ---
 
-## **Constant Expressions:**
-```
-const def myconstexpr(int x, int y) -> int {return x * y;};  // Basic syntax
-```
-
----
-
-## **Heap allocation:**
+<a id="heap-allocation"></a>
+## **Heap allocation**
 ```
 heap int x = 5;      // Allocate
 (void)x;             // Deallocate
@@ -1204,36 +1495,20 @@ heap int x = 5;      // Allocate
 
 `(void)` casting works on both stack and heap allocated items.  
 If you do this to a stack element, it is nulled, and all references invalidated. You will need to redeclare `x`.
+Doing this to a heap element will call `ffree()` under the hood.
+
+Allocating with `heap` calls `fmalloc(sizeof(T))` under the hood. `x` is a pointer.
+
+<a id="freeing-from-the-heap"></a>
+## **Freeing from the heap**
+Flux's standard heap allocator is **incompatible** with C's `malloc` and `free`.
+
+You **must** use `ffree` for anything allocated with `fmalloc`, including `heap` allocations.  
+Alternatively you may void cast.
 
 ---
 
-## **Templates**
-
-```
-#import "standard.fx";
-
-
-def foo<T>(T x) -> T
-{
-    return x;
-};
-
-
-def main() -> int
-{
-    float y = foo<float>(5.5f);
-    int z = foo<int>(3);
-
-    print(y); print();
-    print(z); print();
-
-    system("pause\0");
-    return 0;
-};
-```
-
----
-
+<a id="custom-infix-operators-and-overloading"></a>
 ## **Custom infix operators and overloading**
 - Custom:
 ```
@@ -1266,6 +1541,252 @@ operator (int L, BigInt R) [+] -> bool
 
 ---
 
+<a id="functions-and-contract"></a>
+## **Functions and `contract`**
+Contracts are compile time function modification.  
+They prepend or append the code contained to a function's body.
+
+Pre-contract form puts the contract's statements before the function's code.  
+Post-contract form puts the contract's statements before the function's return.
+
+Contracts are not specifically `assert`-only, they can contain any statement.
+They are similar to macros and expand before type checking and semantic analysis.
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+contract NonZero
+{
+    assert(x > 0, "x must be positive");
+};
+
+contract rValGT10
+{
+    assert(x > 10, "r must be greater than 10");
+};
+
+def foo(int x) -> int : NonZero
+{
+    x = x / 2;
+    return x;
+} : rValGT5;
+
+def main() -> int
+{
+    int y = foo(18);
+
+    return 0;
+};
+```
+Turns into:
+```
+def foo(int x) -> int : NonZero
+{
+    assert(x > 0, "x must be positive");
+    x = x / 2;
+    assert(x > 10, "x must be greater than 10");
+    return x;
+};
+```
+The contracts disappear from the compilation unit after transformation.
+
+---
+
+<a id="contracts-on-operators"></a>
+## Contracts on operators:
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+contract NonZero(a,b)
+{
+    assert(a != 0, "a must be nonzero");
+    assert(b != 0, "b must be nonzero");
+};
+
+operator(int x, i32 y)[+] -> int : NonZero(a,b)
+{
+    return x+y;
+};
+
+
+def main() -> int
+{
+    0 + 4;
+
+    return 0;
+};
+```
+Result at runtime:
+`a must be nonzero`
+
+---
+
+<a id="expressionbased-macros-with-macro"></a>
+## **Expression-based macros with `macro`**
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+macro xyz(a,b,c)
+{
+    (a + b) ^ c
+};
+
+def main() -> int
+{
+    int x, y, z = 1, 2, 3;
+
+    println(f"xyz(abc) = {xyz(x,y,z)}");
+
+    return 0;
+};
+```
+- The `println` string turns into:
+```
+println(f"xyz(abc) = {(1 + 2) ^ 3}");
+```
+Result:
+`xyz(abc) = 27`
+
+---
+
+<a id="templates"></a>
+## **Templates**
+
+```
+#import "standard.fx";
+
+
+def foo<T>(T x) -> T
+{
+    return x;
+};
+
+
+def main() -> int
+{
+    float y = foo<float>(5.5f);
+    int z = foo<int>(3);
+
+    print(y); print();
+    print(z); print();
+
+    system("pause\0");
+    return 0;
+};
+```
+
+The compiler can also infer templates at call sites, so you don't end up with a mess of angle brackets:
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+struct myStru<T>
+{
+    T a, b;
+};
+
+def foo<T, U>(T a, U b) -> U
+{
+    return a.a * b;
+};
+
+def bar(myStru<int> a, int b) -> int
+{
+    return foo(a, 3); // inferred from signature via 'a'
+};
+
+def main() -> int
+{
+    myStru<int> ms = {10,20};
+
+    //int w = foo<myStru<int>, int>(ms, 3); // <brackets> at call site
+
+    int x = foo(ms, 3); // inferred locally
+
+    int y = bar(ms, 3);
+
+    println(x == y);
+    return 0;
+};
+```
+
+<a id="templating-operators"></a>
+## Templating operators:
+```
+operator<T, K>(T t, K k)[+] -> int
+{
+    return t + k;
+};
+```
+
+<a id="combining-templates-contracts-and-operators"></a>
+## Combining templates, contracts, and operators:
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+struct myStru<T>
+{
+    T a, b;
+};
+
+def foo<T, U>(T a, U b) -> U
+{
+    return a.a * b;
+};
+
+def bar(myStru<int> a, int b) -> int
+{
+    return foo(a, 3); // Template inferred from parameter
+};
+
+macro macNZ(x)
+{
+    x != 0
+};
+
+contract ctNonZero(a,b)
+{
+    assert(macNZ(a), "a must be nonzero");
+    assert(macNZ(b), "b must be nonzero");
+};
+
+contract ctGreaterThanZero
+{
+    assert(x > 0, "a must be greater than zero");
+    assert(y > 0, "b must be greater than zero");
+};
+
+operator<T, K>(T t, K k)[+] -> int : ctNonZero(a,b)
+{
+    return t + k;
+} : ctGreaterThanZero;
+
+def main() -> int
+{
+    myStru<int> ms = {10,20};
+
+    int x = foo(ms, 3); // Template inferred from myStru<int> above
+
+    i32 y = bar(ms, 3);
+
+    println(x + y);
+
+    return 0;
+};
+```
+Result: `60`
+
+---
+
+<a id="variadic-functions"></a>
 ## **Variadic functions**
 Variadics in Flux are very straightforward, and use the `...` elipse operator.  
 You can index the elipse operator to yield the arguments passed, example:
@@ -1301,8 +1822,88 @@ Result:
 
 ---
 
+<a id="chaining-functions"></a>
+## **Chaining functions**
+```
+def foo(int x) -> int
+{
+    return x / 2;
+};
+
+def bar () -> int
+{
+    return 0xFF;
+};
+
+int z = foo() <- bar(); // == // int z = foo(bar());
+```
+
+---
+
+<a id="external-functions-ffi"></a>
+## **External Functions (FFI)**
+Single-line:
+```
+extern def foo() -> void;
+extern def !!foo() -> void;  // !! tells the compiler do not mangle this function name
+```
+Block-based:
+```
+extern
+{
+    def foo() -> void;
+    def bar() -> void;
+    def !!zed() -> void;
+};
+```
+Or multiple prototypes at once:
+```
+extern
+{
+    // Memory allocation
+    def !!
+        malloc(size_t) -> void*,
+        memcpy(void*, void*, size_t) -> void*,
+        free(void*) -> void,
+        calloc(size_t, size_t) -> void*,
+        realloc(void*, size_t) -> void*,
+        memcpy(void*, void*, size_t) -> void*,
+        memmove(void*, void*, size_t) -> void*,
+        memset(void*, int, size_t) -> void*,
+        memcmp(void*, void*, size_t) -> int,
+        abort() -> void,
+        exit(int) -> void,
+        atexit(void*) -> int;
+};
+```
+String-literal based function name support to target any compiled library function:
+```
+def "??foo@"()->void;
+```
+
+<a id="exporting-functions-with-export"></a>
+## **Exporting Functions with `export`**
+Using `export` will cause a function to be marked as external for linkage.  
+Use this when writing libraries, or to allow a function to be "seen".
+```
+#import "types.fx";
+
+export
+{
+    def !!stub() -> void {};
+};
+```
+This is a valid library and will compile if you do:
+`python fxc.py tests\testlib.fx --library -o mylib.dll` on Windows,
+and
+`python3 fxc.py tests/testlib.fx --library -o testlib.so` on Linux.
+
+---
+
+<a id="advanced-pointer-manipulation"></a>
 ## **Advanced pointer manipulation**
 
+<a id="taking-address-of-literals"></a>
 ### Taking address of literals
 ```
 // You can take the address of a literal value
@@ -1321,6 +1922,7 @@ int* offset = base + 5;
 *offset = 200;  // Writing to calculated memory location
 ```
 
+<a id="pointer-to-integer-conversions"></a>
 ### Pointer to integer conversions
 ```
 #import "standard.fx";
@@ -1361,107 +1963,12 @@ def main() -> int
 };
 ```
 
-### Manual Struct Offsetting
-```
-struct Vector3
-{
-    float x,
-          y,
-          z;
-};
-
-def get_y_ptr(Vector3* vec) -> float*
-{
-    unsigned data{64} as u64ptr;
-    
-    // Get base address
-    u64ptr base = (u64ptr)vec;
-    
-    // Manually calculate offset to 'y' (sizeof(float) = 4 bytes)
-    u64ptr y_addr = base + 4;
-    
-    // Return pointer to y member
-    return (float*)y_addr;
-};
-
-// Usage
-Vector3 v = {x = 1.0, y = 2.0, z = 3.0};
-float* py = get_y_ptr(@v);
-*py = 5.0;
-print(v.y);  // 5.0
-```
-
-### Pointer Array Traversal
-```
-def traverse_as_bytes(int* ptr, int count) -> void
-{
-    byte* bp = (byte*)ptr;
-    
-    for (int i = 0; i < count * sizeof(int); i++)
-    {
-        print(f"Byte {i}: 0x{*(bp + i):02X}\0");
-    };
-};
-
-int[4] data = [0x12345678, 0x9ABCDEF0, 0x11223344, 0x55667788];
-traverse_as_bytes(@data[0], 4);
-```
-
 ---
 
+<a id="memory-layout-and-alignment-tricks"></a>
 ## **Memory Layout and Alignment Tricks**
 
-### Struct packing with custom alignment
-```
-// Tightly packed struct (no padding)
-struct PackedRGB
-{
-    data{5:0:1} as r5 r;    // 5 bits
-    data{6:0:1} as g6 g;    // 6 bits
-    data{5:0:1} as b5 b;    // 5 bits
-};  // Total: 16 bits (2 bytes)
-
-// Aligned struct with gaps
-struct AlignedData
-{
-    data{8:16} as byte16 flag;   // 8 bits, 16-bit aligned (1 byte data, 1 byte padding)
-    u32 value;                   // 32 bits, 32-bit aligned
-    data{8:16} as byte16 status; // 8 bits, 16-bit aligned
-};  // Total: 64 bits (8 bytes) with padding
-
-sizeof(PackedRGB);    // 2 bytes
-sizeof(AlignedData);  // 8 bytes
-
-// Verify alignment requirements
-alignof(PackedRGB);   // 1 byte
-alignof(AlignedData); // 4 bytes (strictest member alignment)
-```
-
-### Endianness Handling
-```
-data{16::0} as le16;  // Little-endian 16-bit
-data{16}    as be16;  // Big-endian default 16-bit
-
-def swap_endian_16(be value) -> data{16}
-{
-    data{16::0} v2 = value; // Explicit byte swap on assignment
-    return v2;
-};
-
-// Network byte order (big-endian) to host (little-endian)
-def network_to_host(be16 net_value) -> le16
-{
-    le16 x = net_value;     // Explicit byte swap on assignment
-    return x;
-};
-
-// Reading from network buffer
-data{8::0}[4] buf = [0x12, 0x34, 0x56, 0x78];
-be16[2] net = buf; // autopack and convert endianness
-```
-
-1. Single-endian arithmetic model - All math is performed in one endianness (big). Swapping on assignment means the compiler doesn't need to track mixed-endian states through complex expressions.
-
+<a id="bitfield-manipulation"></a>
 ### Bit-Field Manipulation
 ```
 // 13-bit signed value, 16-bit aligned
@@ -1489,7 +1996,8 @@ uint32 byte1 = extract_bits(packed, 8, 8);     // 0x56
 
 ---
 
-### ***Advanced data manipulation techniques:***
+<a id="advanced-data-manipulation-techniques"></a>
+### ***Advanced data manipulation techniques***
 ***C***:
 ```
 len_block[0]  = (byte)((aad_bits    >> 56) & 0xFF);
@@ -1510,7 +2018,7 @@ len_block[14] = (byte)((cipher_bits >>  8) & 0xFF);
 len_block[15] = (byte)( cipher_bits        & 0xFF);
 ```
 
-***Flux equivalent:***
+***Flux equivalent***
 ```
 len_block[0..7]  = (byte[8])(u64)aad_bits;
 len_block[8..15] = (byte[8])(u64)cipher_bits;
@@ -1535,7 +2043,8 @@ pd[7] = 0x7FFFFFFF;
 ///
 ```
 
-### **Reworking a loop:**
+<a id="reworking-a-loop"></a>
+### **Reworking a loop**
 ```
 for (i = 0; i < 4; i++)
 {
@@ -1561,7 +2070,8 @@ hash[24..27] = (byte[4])(be32)ctx.state[6];
 hash[28..31] = (byte[4])(be32)ctx.state[7];
 ```
 
-### ***Bit slices:***
+<a id="bit-slices"></a>
+### ***Bit slices***
 ```
 #import "standard.fx";
 
@@ -1579,7 +2089,8 @@ def main() -> int
 };
 ```
 
-### ***Taking bit slices from structs:***
+<a id="taking-bit-slices-from-structs"></a>
+### ***Taking bit slices from structs***
 Bit slicing structs can cross member boundaries, because structs members are packed tightly in memory.
 ```
 #import "standard.fx";
@@ -1592,7 +2103,7 @@ def main() -> int
 {
     data{4} as u4;
     xx yy = {5,10};
-    u4 a = yy[59``63]; // 10 because 0b1010
+    u4 a = yy[60``63]; // 10 because 0b1010
 
     print((int)a);
 
@@ -1600,7 +2111,8 @@ def main() -> int
 };
 ```
 
-### ***Bit slices of bit slices:***
+<a id="bit-slices-of-bit-slices"></a>
+### ***Bit slices of bit slices***
 ```
 #import "standard.fx";
 
@@ -1613,10 +2125,10 @@ def main() -> int
     data{4} as u4;
     data{2} as u2;
     xx yy = {5,10};
-    u4 a = yy[59``63]; // 10 because 0b1010
+    u4 a = yy[60``63]; // 10 because 0b1010
     u2 b = a[0``1];
 
-    print((int)b); // 2, because 0b10
+    print(int(b)); // 2, because 0b10
 
     return 0;
 };
@@ -1624,8 +2136,10 @@ def main() -> int
 
 ---
 
+<a id="advanced-data-type-features"></a>
 ## **Advanced Data Type Features**
 
+<a id="unusual-bit-widths"></a>
 ### Unusual Bit Widths
 ```
 // 3-bit unsigned value (0-7)
@@ -1651,7 +2165,8 @@ You may take arbitrary width slices as well, stored in your arbitrarily sized ty
 
 ---
 
-## **Function Pointers:**
+<a id="function-pointers"></a>
+## **Function Pointers**
 ```
 #import "standard.fx";
 
@@ -1677,7 +2192,8 @@ def main() -> int
 ```
 
 
-## **Callbacks:**
+<a id="callbacks"></a>
+## **Callbacks**
 One of a few ways you can set up callbacks:
 ```
 #import "standard.fx";
@@ -1703,6 +2219,7 @@ def main() -> int
 };
 ```
 
+<a id="raw-bytecode-functions"></a>
 ## **Raw bytecode functions**
 ```
 #import "standard.fx";
@@ -1721,32 +2238,7 @@ def main() -> int
 
 ---
 
-### Mixing Signed/Unsigned in Expressions
-```
-signed data{32} as i32;
-unsigned data{32} as u32;
-
-i32 a = -10;
-u32 b = 20;
-
-// Mixed arithmetic (result type determined by widest type)
-i32 result1 = a + (i32)b;    // -10 + 20 = 10 (signed)
-u32 result2 = (u32)a + b;    // 4294967286 + 20 (unsigned, wraps)
-
-// Comparison with mixed signs
-if (a < (i32)b)  // true: -10 < 20
-{
-    print("Signed comparison\0");
-};
-
-if ((u32)a < b)  // false: 4294967286 > 20
-{
-    print("Unsigned comparison\0");
-};
-```
-
----
-
+<a id="ownership-with-the-tie-operator"></a>
 ## **Ownership with the tie operator `~`**
 
 Ownership only occurs if you use `~` to tell the compiler to perform a very simple set of rules:
@@ -1782,8 +2274,10 @@ def main() -> int
 
 ---
 
+<a id="control-flow-edge-cases"></a>
 ## **Control Flow Edge Cases**
 
+<a id="nested-switches-with-fallthrough"></a>
 ### Nested Switches with Fallthrough
 ```
 def classify_value(int x, int y) -> void
@@ -1820,6 +2314,7 @@ def classify_value(int x, int y) -> void
 };
 ```
 
+<a id="complex-trycatch-with-multiple-types"></a>
 ### Complex Try/Catch with Multiple Types
 ```
 object ErrorA
@@ -1879,6 +2374,7 @@ def main() -> int
 };
 ```
 
+<a id="nested-loops-with-breakcontinue"></a>
 ### Nested Loops with Break/Continue
 ```
 def find_in_matrix(int[][] matrix, int target) -> bool
@@ -1921,6 +2417,7 @@ def wait_for_ready(int* status_reg) -> void
 
 ---
 
+<a id="simple-packet-parser"></a>
 ### Simple Packet Parser
 ```
 
@@ -1960,6 +2457,7 @@ print(f"Source: {format_ip(hdr.src_addr)}\0");
 print(f"Dest: {format_ip(hdr.dst_addr)}\0");
 ```
 
+<a id="fixedpoint-math"></a>
 ### Fixed-Point Math
 ```
 // 16.16 fixed-point format
@@ -1996,8 +2494,10 @@ print(from_fixed(result));  // approx 6.28318
 
 ---
 
+<a id="type-system-edge-cases"></a>
 ## **Type System Edge Cases**
 
+<a id="void-semantics"></a>
 ### `void` semantics
 ```
 // Void as a value
@@ -2033,7 +2533,8 @@ def get_nullable() -> int*
 
 ---
 
-# **Calling Conventions:**
+<a id="calling-conventions"></a>
+# **Calling Conventions**
 Flux allows you to use different calling conventions at the language level.
 ```
 stdcall foobar() -> void;
@@ -2048,14 +2549,21 @@ vectorcall{}* someSIMDfunc() -> u64*;
 
 ---
 
+<a id="keyword-list"></a>
 # Keyword list:
 ```
-alignof, and, as, asm, assert, auto, break, bool, byte, case, catch, cdecl, const, continue, data, def, default, deprecate, 
-do, double, elif, else, enum, false, fastcall, float, for, global, goto, heap, if, in, is, int, jump, label, local, long, namespace, noinit, noreturn, not, object, or,
-private, public, register, return, signed, singinit, sizeof, stack, stdcall, struct, switch, this, thiscall, throw, true, try, typeof, uint, ulong,
-union, unsigned, vectorcall, void, volatile, while, xor
+alignof, and, as, asm, assert, auto, break, bool, byte, case,
+catch, cdecl, const, continue, contract, data, def, default, defer,
+deprecate, do, double, elif, else, enum, false, fastcall,
+float, for, global, goto, heap, if, in, is, int, jump, label,
+local, long, namespace, noinit, noreturn, not, object, or,
+private, public, register, return, signed, singinit, sizeof,
+stack, stdcall, struct, switch, this, thiscall, throw, true,
+try, typeof, uint, ulong, union, unsigned, using,  vectorcall, void,
+volatile, while, xor
 ```
 
+<a id="operator-list"></a>
 # Operator list:
 ```
 ADD = "+"
@@ -2114,6 +2622,7 @@ BITXNOR_ASSIGN = "`^^!|="
 
 # Ternary assignment, assign if left side is null.
 TERN_ASSIGN = "?="
+NOT_NULL = "!?"     // unary boolean postfix operator, primary use for pointers `if (px!?) {...}`
 
 # Shift
 BITSHIFT_LEFT = "<<"
@@ -2124,13 +2633,13 @@ BITSHIFT_RIGHT_ASSIGN = ">>="
 BITSLICE = "``"
 
 ADDRESS_OF = "@"
+ADDRESS_ASSIGN = "@="
 RANGE = ".."
 SCOPE = "::"
 QUESTION = "?"
 COLON = ":"
 TIE = "~"
 STRINGIFY = "$"
-LAMBDA_ARROW = "<:-"
 RETURN_ARROW = "->"
 CHAIN_ARROW = "<-"
 RECURSE_ARROW = "<~" // def foo() <~ void;  // Emits musttail, 0 stack growth
@@ -2142,13 +2651,16 @@ ADDRESS_CAST = "(@)"
 
 ---
 
+<a id="primitive-types"></a>
 ## Primitive types:
 
 bool `true`/`false`, byte `0xFF`, int `5`, uint `300u`, long `23492399393233`, ulong `983787283748727u`, float `3.14159`/`20f`, double `3.1415926585`/`360d`, char `"B"` == `66` - `65` == `'A'`, data
 
+<a id="all-types"></a>
 ## All types:
 
 bool, byte, int, uint, long, ulong, float, double, char, data, void, object, struct, union, enum
 
+<a id="preprocesor-directives"></a>
 ## Preprocesor directives:
 `#import`, `#dir`, `#def`, `#ifdef`, `#ifndef`, `#else`, `#warn`, `#stop`

@@ -81,7 +81,7 @@ def hmac_sha256(byte* key, int key_len, byte* xdata, int xdata_len, byte* out) -
     byte k;
 
     // Zero-pad key into the 64-byte blocks, XOR with ipad/opad constants
-    for (i = 0; i < 64; i++)
+    for (i < 64; i++)
     {
         k = (i < key_len) ? key[i] : (byte)0;
         ipad_key[i] = k ^^ (byte)0x36;
@@ -107,8 +107,8 @@ def hmac_sha256(byte* key, int key_len, byte* xdata, int xdata_len, byte* out) -
 def sig_equal(byte* a, byte* b) -> bool
 {
     byte diff;
-    int i;
-    for (i = 0; i < 32; i++)
+    
+    for (int i = 0; i < 32; i++)
     {
         diff = diff | (a[i] ^^ b[i]);
     };

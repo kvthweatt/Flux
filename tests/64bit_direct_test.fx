@@ -1,5 +1,7 @@
 #import "standard.fx";
 
+using standard::io::console;
+
 def test_direct() -> int
 {
     // Direct operations without function calls

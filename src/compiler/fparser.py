@@ -66,6 +66,7 @@ _CALLING_CONV_TOKEN_TO_STR = {
 }
 
 _TOKEN_SYMBOL_MAP = {
+    # Operators
     TokenType.PLUS:               '+',
     TokenType.MINUS:              '-',
     TokenType.MULTIPLY:           '*',
@@ -96,6 +97,19 @@ _TOKEN_SYMBOL_MAP = {
     TokenType.BITNOR_OP:          '`!|',
     TokenType.BITXNAND:           '`^^!&',
     TokenType.BITXNOR:            '`^^!|',
+    # Punctuation / delimiters
+    TokenType.LEFT_PAREN:         '(',
+    TokenType.RIGHT_PAREN:        ')',
+    TokenType.LEFT_BRACE:         '{',
+    TokenType.RIGHT_BRACE:        '}',
+    TokenType.LEFT_BRACKET:       '[',
+    TokenType.RIGHT_BRACKET:      ']',
+    TokenType.SEMICOLON:          ';',
+    TokenType.COLON:              ':',
+    TokenType.COMMA:              ',',
+    TokenType.DOT:                '.',
+    TokenType.RETURN_ARROW:       '->',
+    TokenType.SCOPE:              '::',
 }
 
 _SYMBOL_MANGLE = {
@@ -107,30 +121,154 @@ _SYMBOL_MANGLE = {
 
 class ParseError(Exception):
     """Exception raised when parsing fails"""
-    def __init__(self, message: str, token: Optional[Token] = None):
+
+    # Token types where the missing token belongs at the END of the previous
+    # line, not at the start of wherever the parser noticed it was absent.
+    _END_OF_PREV_LINE_TYPES = {TokenType.SEMICOLON, TokenType.COMMA}
+
+    def __init__(self, message: str, token: Optional[Token] = None,
+                 source_lines: Optional[List[str]] = None,
+                 expected_type=None, prev_token: Optional[Token] = None,
+                 line_map=None):
         self.message = message
         self.token = token
-        super().__init__(f"{message} Line {token.line}:{token.column}")
+        self.source_lines = source_lines
+        self.expected_type = expected_type  # TokenType or None
+        self.prev_token = prev_token
+        self.line_map = line_map or []
+        super().__init__(self._format())
+
+    def _format(self) -> str:
+        if self.token is None:
+            self.display_line = None
+            self.display_col  = None
+            return self.message
+
+        line_no = self.token.line
+        col    = self.token.column  # 1-based
+
+        if not self.source_lines:
+            self.display_line = line_no
+            self.display_col  = col
+            return f"{self.message} at {line_no}:{col}"
+
+        # For tokens like ';' that should appear at the end of the previous
+        # statement, point to the end of that line instead of the start of the
+        # current (wrong) token — but only when the offending token is actually
+        # on a different line than the previous token.
+        show_line_no = line_no
+        show_col = col
+        if (self.expected_type in self._END_OF_PREV_LINE_TYPES
+                and self.prev_token is not None
+                and self.prev_token.line < line_no
+                and 1 <= self.prev_token.line <= len(self.source_lines)):
+            show_line_no = self.prev_token.line
+            prev_src = self.source_lines[show_line_no - 1].rstrip('\n')
+            show_col = len(prev_src) + 1  # one past the last real character
+
+        # Header now uses the resolved show_line_no/show_col, not the raw token position
+        display_line_no = self.line_map[show_line_no - 1][1] if self.line_map and 1 <= show_line_no <= len(self.line_map) else show_line_no
+        # Store the fully-resolved coordinates so callers (e.g. the LSP server)
+        # can use them directly without re-parsing the formatted message string.
+        self.display_line = display_line_no
+        self.display_col  = show_col
+        header = f"{self.message} at {display_line_no}:{show_col}"
+
+        if not (1 <= show_line_no <= len(self.source_lines)):
+            return header
+
+        raw_line = self.source_lines[show_line_no - 1].rstrip('\n')
+
+        # Expand tabs to 4 spaces and adjust show_col to match the expanded line.
+        # Tabs before the caret shift the visual column, so we must track how many
+        # extra spaces each tab added up to (but not including) the caret position.
+        TAB_WIDTH = 4
+        expanded = ''
+        expanded_col = 1  # visual column of the caret after expansion (1-based)
+        for i, ch in enumerate(raw_line):
+            col_in_raw = i + 1  # 1-based position in the original line
+            if ch == '\t':
+                # How many spaces this tab expands to
+                spaces = TAB_WIDTH - (len(expanded) % TAB_WIDTH)
+                expanded += ' ' * spaces
+                if col_in_raw < show_col:
+                    expanded_col += spaces  # tab counts as `spaces` visual columns
+            else:
+                expanded += ch
+                if col_in_raw < show_col:
+                    expanded_col += 1  # regular character counts as 1 visual column
+
+        src_line = expanded
+        # In the semicolon-redirect case show_col was set to one past the end of
+        # the raw line, so the caret should land after the last visible character
+        # of the *expanded* line rather than using the raw column arithmetic.
+        if show_col > len(raw_line):
+            dash_count = len(src_line)
+        else:
+            dash_count = max(0, expanded_col - 1)
+        hint = ''
+        if self.expected_type is not None:
+            sym = _TOKEN_SYMBOL_MAP.get(self.expected_type)
+            hint = f' {sym} expected here' if sym else f' {self.expected_type.name} expected here'
+        caret_line = '-' * dash_count + '^' + hint
+
+        # Suggestion line: only for cases where the fix is a simple symbol insertion.
+        #   • END_OF_PREV_LINE_TYPES (SEMICOLON, COMMA): append the symbol at the end.
+        #   • RETURN_ARROW: insert '->' at the caret column in the source line.
+        suggestion = ''
+        fix_sym = _TOKEN_SYMBOL_MAP.get(self.expected_type) if self.expected_type is not None else None
+        if fix_sym is not None:
+            if self.expected_type in self._END_OF_PREV_LINE_TYPES:
+                suggestion = src_line + fix_sym + '  // try this'
+            elif self.expected_type == TokenType.RETURN_ARROW:
+                suggestion = src_line[:dash_count] + fix_sym + ' ' + src_line[dash_count:].lstrip() + '  // try this'
+
+        if suggestion:
+            return f"{header}\n{src_line}\n{caret_line}\n{suggestion}"
+        return f"{header}\n{src_line}\n{caret_line}"
 
 class FluxParser:
-    def __init__(self, tokens: List[Token], default_byte_width: int = None):
+    def __init__(self, tokens: List[Token], default_byte_width: int = 8, source_lines: Optional[List[str]] = None):
         self.tokens = tokens
         self.position = 0
         self.current_token = self.tokens[0] if tokens else None
         self.parse_errors = []  # Track parse errors
+        self._source_lines: Optional[List[str]] = source_lines  # for rich error display
         self._processing_imports = set()
         self.symbol_table = SymbolTable()
         self._preprocessor_macros = []
+        self._macros = {}  # name -> macroDef, populated as macro definitions are parsed
         self._namespace_stack = []  # Track current namespace path for symbol registration
         self._object_init_params = {}  # object_name -> __init parameter count (excluding 'this')
         self._template_functions = {}  # name -> (template_param_names, FunctionDef AST)
         self._emitted_template_instances = set()  # mangled names already instantiated
         self._template_instantiations = []  # concrete FunctionDef nodes to inject into program
+        self._template_structs = {}               # name -> (param_names, StructDef AST)
+        self._emitted_template_struct_instances = set()
+        self._template_struct_instances = []      # concrete StructDefs to inject
         self._parsed_objects = {}  # object_name -> ObjectDef AST node
         self._custom_operators: Dict[str, str] = {}  # symbol string -> base function name
+        self._template_operators: Dict[str, tuple] = {}  # op_symbol -> (template_param_names, FunctionDef AST)
+        self._emitted_template_operator_instances: set = set()  # mangled names already instantiated
+        self._contracts: Dict[str, Block] = {}  # name -> Block of statements to inject
         self._function_depth = 0  # Tracks nesting depth; nested function defs are illegal
         self._loop_depth = 0      # Tracks nesting depth of for/while/do-while loops
+        self._in_for_init = False # True while parsing the init clause of a for(...) header
+        self._in_trait = 0        # Tracks nesting depth inside trait bodies (prototypes only)
         self._default_byte_width = default_byte_width if default_byte_width is not None else _get_byte_width(_flux_config)
+        self._comptime_strings: Dict[str, str] = {}  # var_name -> string value, for ~$ codify splicing
+        # Populated by from_file after preprocessing; maps global line index (0-based) -> (filename, local_line 1-based)
+        self._line_map: List[tuple] = []
+
+    def resolve_source_location(self, global_line: int) -> tuple:
+        """
+        Translate a 1-based global (merged) line number to (filename, local_line).
+        Falls back to (None, global_line) when no map is available or the line is
+        out of range (e.g. it came from an import that produced no output lines).
+        """
+        if self._line_map and 1 <= global_line <= len(self._line_map):
+            return self._line_map[global_line - 1]
+        return (None, global_line)
 
     @classmethod
     def from_file(self, source_file: str, compiler_macros: Optional[Dict[str, str]] = None):
@@ -148,11 +286,18 @@ class FluxParser:
 
         # Step 3: Create parser
         print(f"[INFO] [parser] ► Parsing")
-        parser = self(tokens)
+        source_lines = preprocessed_source.splitlines(keepends=True)
+        parser = self(tokens, source_lines=source_lines)
         print(f"[INFO] [parser] ► AST generated.")
 
         # Expose final macro set to parser/codegen if needed
-        parser._preprocessor_macros = dict(preprocessor.macros)
+        parser._preprocessor_macros = dict(preprocessor.constants)
+
+        # Expose line map so error reporting can translate global -> (file, local_line)
+        # line_map[i] = (filename, local_line_number) for output_lines[i] (0-based)
+        # The merged source has one extra '\n' join between each line, so global line N
+        # (1-based) corresponds to line_map[N-1] when N <= len(line_map).
+        parser._line_map = preprocessor.line_map
 
         return parser
 
@@ -166,10 +311,41 @@ class FluxParser:
             self.position = saved_pos
             self.current_token = saved_token
     
-    def error(self, message: str) -> None:
+    def error(self, message: str, expected_type=None, prev_token=None) -> None:
         """Raise a parse error with current token context"""
-        raise ParseError(message, self.current_token)
-    
+        raise ParseError(message, self.current_token, self._source_lines, expected_type, prev_token, self._line_map)
+
+    def warn(self, message: str) -> None:
+        """Emit a non-fatal compiler warning to stderr with source location context."""
+        tok = self.current_token
+        if tok is not None:
+            line_no = tok.line
+            col = tok.column
+            header = f"Warning: {message} at {line_no}:{col}"
+            if self._source_lines and 1 <= line_no <= len(self._source_lines):
+                raw_line = self._source_lines[line_no - 1].rstrip('\n')
+                TAB_WIDTH = 4
+                expanded = ''
+                expanded_col = 1
+                for i, ch in enumerate(raw_line):
+                    col_in_raw = i + 1
+                    if ch == '\t':
+                        spaces = TAB_WIDTH - (len(expanded) % TAB_WIDTH)
+                        expanded += ' ' * spaces
+                        if col_in_raw < col:
+                            expanded_col += spaces
+                    else:
+                        expanded += ch
+                        if col_in_raw < col:
+                            expanded_col += 1
+                dash_count = max(0, expanded_col - 1)
+                caret_line = '-' * dash_count + '^'
+                print(f"{header}\n{expanded}\n{caret_line}", file=sys.stderr)
+            else:
+                print(header, file=sys.stderr)
+        else:
+            print(f"Warning: {message}", file=sys.stderr)
+
     def advance(self) -> Token:
         """Move to the next token"""
         if self.position < len(self.tokens) - 1:
@@ -194,7 +370,8 @@ class FluxParser:
         """Consume a token of the expected type or raise error"""
         if not self.expect(expected_type):
             msg = message or f"Expected {expected_type.name}, got {self.current_token.type.name if self.current_token else 'EOF'}"
-            self.error(msg)
+            prev = self.tokens[self.position - 1] if self.position > 0 else None
+            self.error(msg, expected_type, prev)
         token = self.current_token
         self.advance()
         return token
@@ -316,11 +493,37 @@ class FluxParser:
 
     def operator_def(self) -> FunctionDef:
         """
-        operator_def -> 'operator' '(' parameter_list ')' '[' op_tokens+ ']' '->' type_spec (';' | block ';')
+        operator_def -> 'operator' ('<' template_params '>')? '(' parameter_list ')' '[' op_tokens+ ']' '->' type_spec
+                        (':' contract_list)? (';' | block (':' post_contract_list)? ';')
         """
         tok = self.current_token
         # Consume 'operator' keyword token
         self.consume(TokenType.OPERATOR)
+
+        # Parse optional template parameter list: operator<T, K>(...)
+        # Use lookahead to confirm all angle-bracket contents are identifiers.
+        template_params = []
+        if self.expect(TokenType.LESS_THAN):
+            with self._lookahead():
+                is_template = False
+                self.advance()  # consume '<'
+                if self.expect(TokenType.IDENTIFIER):
+                    self.advance()
+                    while self.expect(TokenType.COMMA):
+                        self.advance()
+                        if not self.expect(TokenType.IDENTIFIER):
+                            break
+                        self.advance()
+                    if self.expect(TokenType.GREATER_THAN):
+                        is_template = True
+            if is_template:
+                self.advance()  # consume '<'
+                template_params.append(self.consume(TokenType.IDENTIFIER).value)
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    template_params.append(self.consume(TokenType.IDENTIFIER).value)
+                self.consume(TokenType.GREATER_THAN)
+
         self.consume(TokenType.LEFT_PAREN)
         params = self.parameter_list()
         self.consume(TokenType.RIGHT_PAREN)
@@ -347,12 +550,45 @@ class FluxParser:
         self.consume(TokenType.RETURN_ARROW)
         return_type = self.type_spec()
 
+        # Pre-contracts: -> rtype : Contract1, Contract2 { ... }
+        contract_stmts = []
+        if self.expect(TokenType.COLON):
+            self.advance()
+            contract_name, call_args = self._parse_contract_ref()
+            if contract_name not in self._contracts:
+                self.error(f"Undefined contract '{contract_name}'")
+            contract_stmts.extend(self._resolve_contract(contract_name, params, call_args))
+            while self.expect(TokenType.COMMA):
+                self.advance()
+                contract_name, call_args = self._parse_contract_ref()
+                if contract_name not in self._contracts:
+                    self.error(f"Undefined contract '{contract_name}'")
+                contract_stmts.extend(self._resolve_contract(contract_name, params, call_args))
+
         if self.expect(TokenType.SEMICOLON):
             self.advance()
             body = Block([])
             is_prototype = True
         else:
             body = self.block()
+            if contract_stmts:
+                body.statements = contract_stmts + body.statements
+            # Post-contracts: } : Post1, Post2;
+            post_contract_stmts = []
+            if self.expect(TokenType.COLON):
+                self.advance()
+                post_name, post_call_args = self._parse_contract_ref()
+                if post_name not in self._contracts:
+                    self.error(f"Undefined post-contract '{post_name}'")
+                post_contract_stmts.extend(self._resolve_contract(post_name, params, post_call_args))
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    post_name, post_call_args = self._parse_contract_ref()
+                    if post_name not in self._contracts:
+                        self.error(f"Undefined post-contract '{post_name}'")
+                    post_contract_stmts.extend(self._resolve_contract(post_name, params, post_call_args))
+            if post_contract_stmts:
+                body = self._apply_post_contracts(body, return_type, post_contract_stmts)
             self.consume(TokenType.SEMICOLON)
             is_prototype = False
 
@@ -365,21 +601,37 @@ class FluxParser:
         _builtin_op_values = {op.value for op in _Operator}
         if symbol in _builtin_op_values:
             # Overloading a built-in operator is only permitted when at least one
-            # parameter is an object or struct type.  Allowing purely primitive
-            # operand pairs (e.g. int + int) would silently hijack all uses of
-            # that operator on those types.
-            def _is_object_or_struct(ts):
-                return (ts.custom_typename is not None or
-                        ts.base_type in (DataType.STRUCT, DataType.OBJECT) or
-                        ts.is_pointer)
-            if not any(_is_object_or_struct(p.type_spec) for p in params):
-                self.error(
-                    f"Overloading built-in operator '{symbol}' requires at least "
-                    f"one parameter to be an object or struct type"
-                )
+            # parameter is an object or struct type — OR the overload is templated
+            # (in which case the concrete types are not known yet).
+            if not template_params:
+                def _is_non_builtin(ts):
+                    # Any type that is not one of the core primitive keywords is
+                    # non-builtin: objects, structs, custom-typename aliases, DATA
+                    # width types (i32, ui32, be16, ...), and pointers.
+                    return (ts.custom_typename is not None or
+                            ts.base_type in (DataType.STRUCT, DataType.OBJECT, DataType.DATA) or
+                            ts.is_pointer)
+                if not any(_is_non_builtin(p.type_spec) for p in params):
+                    self.error(
+                        f"Overloading built-in operator '{symbol}' requires at least "
+                        f"one parameter to be a non-builtin type"
+                    )
         else:
             self._custom_operators[symbol] = func_name
         self.symbol_table.define(symbol, SymbolKind.OPERATOR)
+
+        # If this is a template operator, store it for deferred instantiation.
+        if template_params:
+            func_def = FunctionDef(
+                name=func_name,
+                parameters=params,
+                return_type=return_type,
+                body=body,
+                is_prototype=is_prototype,
+                no_mangle=False
+            ).set_location(tok.line, tok.column)
+            self._template_operators[symbol] = (template_params, func_def)
+            return None
 
         return FunctionDef(
             name=func_name,
@@ -423,11 +675,11 @@ class FluxParser:
                 elif stmt:
                     statements.append(stmt)
             except ParseError as e:
-                error_msg = f"Parse error: {e}"
-                print(error_msg, file=sys.stdout)
-                self.parse_errors.append(error_msg)
-                self.synchronize()
+                error_msg = f"\nParse error: {e}"
+                raise ValueError(error_msg) from e
         # Prepend template instantiations so they are emitted before any call site
+        if self._template_struct_instances:
+            statements = self._template_struct_instances + statements
         if self._template_instantiations:
             statements = self._template_instantiations + statements
         return Program(self.symbol_table, statements=statements)
@@ -544,7 +796,9 @@ class FluxParser:
                 return var_decl
         
         # No storage class or qualifiers - check for other statement types
-        if self.expect(TokenType.USING):
+        if self.expect(TokenType.MACRO):
+            return self.macro_def()
+        elif self.expect(TokenType.USING):
             return self.using_statement()
         elif self.expect(TokenType.NOT):
             self.advance()
@@ -555,6 +809,10 @@ class FluxParser:
             return self.operator_def()
         elif self.expect(TokenType.EXTERN):
             return self.extern_statement()
+        elif self.expect(TokenType.EXPORT):
+            return self.export_statement()
+        elif self.expect(TokenType.CONTRACT):
+            return self.contract_def()
         elif self.expect(TokenType.DEF):
             return self.function_def()
         elif self.current_token.type in _CALLING_CONV_TOKENS:
@@ -621,7 +879,7 @@ class FluxParser:
             return self.variable_declaration_statement()
         elif self.expect(TokenType.SIGNED):
             return self.variable_declaration_statement()
-        elif self.expect(TokenType.SINT, TokenType.UINT, TokenType.DATA, TokenType.CHAR, 
+        elif self.expect(TokenType.SINT, TokenType.UINT, TokenType.DATA, TokenType.CHAR, TokenType.BYTE, 
                          TokenType.FLOAT_KW, TokenType.DOUBLE_KW, TokenType.BOOL_KW, TokenType.VOID,
                          TokenType.SLONG, TokenType.ULONG):
             return self.variable_declaration_statement()
@@ -633,6 +891,47 @@ class FluxParser:
             destructure = self.destructuring_assignment()
             self.consume(TokenType.SEMICOLON)
             return destructure
+        elif self.expect(TokenType.CODIFY):
+            # ~$varname; — compile-time code injection.
+            # The parser re-lexes the string literal stored in varname and parses
+            # it into statements that are spliced in place of this statement.
+            # A completely fresh parser is used with zero shared state so that
+            # no symbol-table mutations bleed back into the outer parse.
+            tok = self.current_token
+            self.advance()  # consume CODIFY (~$)
+            if self.expect(TokenType.STRING_LITERAL):
+                source_text = self.current_token.value
+                self.advance()
+            elif self.expect(TokenType.F_STRING):
+                raw = self.consume(TokenType.F_STRING).value
+                fstr = self.parse_f_string(raw[2:-1])  # strip f" and closing "
+                source_text = "".join(p if isinstance(p, str) else self._comptime_strings[p.name] for p in fstr.parts)
+            elif self.expect(TokenType.I_STRING):
+                istr = self.parse_i_string(self.consume(TokenType.I_STRING).value)
+                source_text = "".join(p if isinstance(p, str) else self._comptime_strings[p.name] for p in istr.parts)
+            elif self.expect(TokenType.IDENTIFIER):
+                var_name = self.current_token.value
+                self.advance()
+                if var_name not in self._comptime_strings:
+                    self.error(
+                        f"~$: '{var_name}' is not a compile-time-known byte* string literal. "
+                        f"Only variables declared as 'byte* name = \"...\";' are supported."
+                    )
+                source_text = self._comptime_strings[var_name]
+            else:
+                self.error("~$: expected identifier, string literal, f-string, or i-string after codify operator")
+            self.consume(TokenType.SEMICOLON)
+            sub_lexer = FluxLexer(source_text)
+            sub_tokens = sub_lexer.tokenize()
+            sub_parser = FluxParser(sub_tokens)
+            sub_stmts = []
+            while not sub_parser.expect(TokenType.EOF):
+                stmt = sub_parser.statement()
+                if isinstance(stmt, list):
+                    sub_stmts.extend(s for s in stmt if s is not None)
+                elif stmt is not None:
+                    sub_stmts.append(stmt)
+            return sub_stmts if sub_stmts else None
         elif self.expect(TokenType.ASM):
             return self.asm_statement()
         else:
@@ -755,13 +1054,352 @@ class FluxParser:
             self.error("Expected '{' or 'def' after 'extern'")
         
         return ExternBlock(declarations).set_location(tok.line, tok.column)
-    
+
+    def export_statement(self) -> 'ExportBlock':
+        """
+        export_statement -> 'export' '{' export_function_def* '}' ';'
+                         | 'export' 'def' function_def ';'
+
+        Marks functions as externally visible (dllexport / ELF global).
+        Unlike 'extern', exported functions must have full definitions (bodies).
+        Supports the same inline and block forms as 'extern':
+
+            export def !!some_func() -> rtype { ... };
+
+            export
+            {
+                def !!some_func() -> rtype { ... };
+            };
+        """
+        tok = self.current_token
+        self.consume(TokenType.EXPORT)
+
+        definitions = []
+
+        if self.expect(TokenType.LEFT_BRACE):
+            # Block form: export { ... };
+            self.advance()
+
+            while not self.expect(TokenType.RIGHT_BRACE):
+                if self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
+                    func_def = self.function_def()
+                    if isinstance(func_def, list):
+                        for fd in func_def:
+                            if fd.is_prototype:
+                                self.error("'export' requires a full definition, not a prototype")
+                            definitions.append(fd)
+                    else:
+                        if func_def.is_prototype:
+                            self.error("'export' requires a full definition, not a prototype")
+                        definitions.append(func_def)
+                else:
+                    self.error("Expected function definition inside export block")
+
+            self.consume(TokenType.RIGHT_BRACE)
+            self.consume(TokenType.SEMICOLON)
+            return ExportBlock(definitions).set_location(tok.line, tok.column)
+
+        elif self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
+            # Single form: export def ...;
+            func_def = self.function_def()
+            if isinstance(func_def, list):
+                for fd in func_def:
+                    if fd.is_prototype:
+                        self.error("'export' requires a full definition, not a prototype")
+                    definitions.append(fd)
+            else:
+                if func_def.is_prototype:
+                    self.error("'export' requires a full definition, not a prototype")
+                definitions.append(func_def)
+        else:
+            self.error("Expected '{' or 'def' after 'export'")
+
+        return ExportBlock(definitions).set_location(tok.line, tok.column)
+
+    def _parse_contract_ref(self):
+        """
+        Parse a contract reference at an attachment site.
+        Returns (contract_name, call_site_args_or_None).
+
+        Syntax:
+            ContractName                  -> ('ContractName', None)
+            ContractName(a, b)            -> ('ContractName', ['a', 'b'])
+        """
+        name = self.consume(TokenType.IDENTIFIER).value
+        call_args = None
+        if self.expect(TokenType.LEFT_PAREN):
+            self.advance()
+            call_args = []
+            if not self.expect(TokenType.RIGHT_PAREN):
+                call_args.append(self.consume(TokenType.IDENTIFIER).value)
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    call_args.append(self.consume(TokenType.IDENTIFIER).value)
+            self.consume(TokenType.RIGHT_PAREN)
+        return name, call_args
+
+    def _resolve_contract(self, contract_name: str, func_params: list,
+                          call_site_args: list = None) -> list:
+        """
+        Return a deep-copied, substituted list of statements for the named contract.
+
+        call_site_args: optional list of identifier strings supplied at the
+        attachment site, e.g. the ['y', 'x'] from `: LessThan(y, x)`.  When
+        provided they define the mapping order (contract param[i] -> call_site_args[i],
+        which must itself be a name of a real function parameter).  When absent,
+        mapping is positional: contract param[i] -> real_params[i].
+
+        For plain (unparameterized) contracts the statements are returned as-is
+        (deep-copied so each injection site is independent).
+        """
+        import copy
+        c_params, c_body = self._contracts[contract_name]
+        real_params = [p for p in func_params if not getattr(p, '_is_variadic_sentinel', False)]
+        real_param_names = {p.name for p in real_params if p.name is not None}
+        if c_params:
+            if call_site_args is not None:
+                # Explicit remapping: arity must match contract params
+                if len(call_site_args) != len(c_params):
+                    self.error(
+                        f"Contract '{contract_name}' expects {len(c_params)} parameter(s) "
+                        f"but {len(call_site_args)} argument(s) given at attachment site"
+                    )
+                # Remap contract params to function params positionally.
+                # call_site_args[i] is the contract param name that maps to real_params[i].
+                if len(real_params) < len(call_site_args):
+                    self.error(
+                        f"Contract '{contract_name}' attachment maps {len(call_site_args)} "
+                        f"parameter(s) but function only has {len(real_params)}"
+                    )
+                subst = {
+                    call_site_args[i]: real_params[i].name
+                    for i in range(len(call_site_args))
+                    if real_params[i].name is not None
+                }
+            else:
+                # Positional mapping
+                if len(c_params) != len(real_params):
+                    self.error(
+                        f"Contract '{contract_name}' expects {len(c_params)} parameter(s) "
+                        f"but function has {len(real_params)}"
+                    )
+                subst = {
+                    c_param: real_params[i].name
+                    for i, c_param in enumerate(c_params)
+                    if real_params[i].name is not None
+                }
+            stmts_copy = copy.deepcopy(c_body.statements)
+            return self._substitute_contract_stmts(stmts_copy, subst)
+        return copy.deepcopy(c_body.statements)
+
+    def _substitute_contract_stmts(self, stmts: list, subst: dict) -> list:
+        """
+        Walk a list of statements and replace every Identifier whose name is a
+        key in `subst` with a new Identifier of the mapped name.  This covers
+        the statement-level nodes that appear in contract bodies.
+        """
+        for stmt in stmts:
+            self._substitute_stmt(stmt, subst)
+        return stmts
+
+    def _substitute_stmt(self, stmt, subst: dict) -> None:
+        """In-place substitution over a single statement node."""
+        if stmt is None:
+            return
+        if isinstance(stmt, AssertStatement):
+            stmt.condition = self._substitute_expr(stmt.condition, subst)
+            if stmt.message is not None and not isinstance(stmt.message, str):
+                stmt.message = self._substitute_expr(stmt.message, subst)
+        elif isinstance(stmt, ExpressionStatement):
+            stmt.expression = self._substitute_expr(stmt.expression, subst)
+        elif isinstance(stmt, ReturnStatement):
+            if stmt.value is not None:
+                stmt.value = self._substitute_expr(stmt.value, subst)
+        elif isinstance(stmt, (Assignment, CompoundAssignment, TernaryAssign)):
+            stmt.target = self._substitute_expr(stmt.target, subst)
+            stmt.value  = self._substitute_expr(stmt.value,  subst)
+        elif isinstance(stmt, VariableDeclaration):
+            if stmt.initial_value is not None:
+                stmt.initial_value = self._substitute_expr(stmt.initial_value, subst)
+        elif isinstance(stmt, Block):
+            self._substitute_contract_stmts(stmt.statements, subst)
+        elif isinstance(stmt, IfStatement):
+            stmt.condition = self._substitute_expr(stmt.condition, subst)
+            self._substitute_contract_stmts(stmt.then_block.statements, subst)
+            if stmt.else_block:
+                self._substitute_contract_stmts(stmt.else_block.statements, subst)
+            stmt.elif_blocks = [
+                (self._substitute_expr(cond, subst),
+                 Block(self._substitute_contract_stmts(blk.statements, subst)))
+                for cond, blk in stmt.elif_blocks
+            ]
+        elif isinstance(stmt, (ForLoop, ForInLoop, WhileLoop, DoLoop, DoWhileLoop)):
+            self._substitute_contract_stmts(stmt.body.statements, subst)
+        elif isinstance(stmt, TryBlock):
+            self._substitute_contract_stmts(stmt.try_body.statements, subst)
+            for _, _, blk in stmt.catch_blocks:
+                self._substitute_contract_stmts(blk.statements, subst)
+
+    def _substitute_expr(self, expr, subst: dict):
+        """Recursively substitute Identifiers in an expression node."""
+        if expr is None:
+            return expr
+        if isinstance(expr, Identifier):
+            if expr.name in subst:
+                return Identifier(subst[expr.name]).set_location(expr.source_line, expr.source_col)
+            return expr
+        if isinstance(expr, BinaryOp):
+            expr.left  = self._substitute_expr(expr.left,  subst)
+            expr.right = self._substitute_expr(expr.right, subst)
+        elif isinstance(expr, UnaryOp):
+            expr.operand = self._substitute_expr(expr.operand, subst)
+        elif isinstance(expr, (CastExpression, TieExpression)):
+            expr.expression = self._substitute_expr(expr.expression, subst)
+        elif isinstance(expr, FunctionCall):
+            expr.arguments = [self._substitute_expr(a, subst) for a in expr.arguments]
+        elif isinstance(expr, MethodCall):
+            expr.object    = self._substitute_expr(expr.object, subst)
+            expr.arguments = [self._substitute_expr(a, subst) for a in expr.arguments]
+        elif isinstance(expr, MemberAccess):
+            expr.object = self._substitute_expr(expr.object, subst)
+        elif isinstance(expr, ArrayAccess):
+            expr.array = self._substitute_expr(expr.array, subst)
+            expr.index = self._substitute_expr(expr.index, subst)
+        elif isinstance(expr, TernaryOp):
+            expr.condition  = self._substitute_expr(expr.condition,  subst)
+            expr.true_expr  = self._substitute_expr(expr.true_expr,  subst)
+            expr.false_expr = self._substitute_expr(expr.false_expr, subst)
+        elif isinstance(expr, NullCoalesce):
+            expr.left  = self._substitute_expr(expr.left,  subst)
+            expr.right = self._substitute_expr(expr.right, subst)
+        elif isinstance(expr, ArrayLiteral):
+            expr.elements = [self._substitute_expr(e, subst) for e in expr.elements]
+        elif isinstance(expr, FStringLiteral):
+            expr.parts = [
+                self._substitute_expr(part, subst) if not isinstance(part, str) else part
+                for part in expr.parts
+            ]
+        return expr
+
+    def _apply_post_contracts(self, body: Block, return_type, post_stmts: list) -> Block:
+        """
+        Rewrite every ReturnStatement in body so that post-contract assertions
+        run against the return value before the function actually returns.
+
+        Each ``return <expr>;`` becomes::
+
+            <return_type> r = <expr>;
+            <post_contract assertions referencing r>
+            return r;
+
+        The rewrite is recursive so returns inside nested if/for/while/try blocks
+        are also caught.  The sentinel name ``r`` matches the convention used
+        in contract bodies (e.g. ``assert(r > 10, ...)``).
+        """
+        import copy
+
+        def _rewrite_stmts(stmts):
+            out = []
+            for stmt in stmts:
+                if isinstance(stmt, ReturnStatement) and stmt.value is not None:
+                    # <return_type> r = <expr>;
+                    r_decl = VariableDeclaration(
+                        name='r',
+                        type_spec=return_type,
+                        initial_value=stmt.value,
+                    )
+                    r_decl.set_location(stmt.source_line, stmt.source_col)
+                    # deep-copy contract stmts so each return site is independent
+                    injected = copy.deepcopy(post_stmts)
+                    # return r;
+                    r_ret = ReturnStatement(Identifier('r'))
+                    r_ret.set_location(stmt.source_line, stmt.source_col)
+                    out.append(r_decl)
+                    out.extend(injected)
+                    out.append(r_ret)
+                elif isinstance(stmt, Block):
+                    out.append(Block(_rewrite_stmts(stmt.statements)))
+                elif isinstance(stmt, IfStatement):
+                    stmt.then_block = Block(_rewrite_stmts(stmt.then_block.statements))
+                    if stmt.else_block is not None:
+                        stmt.else_block = Block(_rewrite_stmts(stmt.else_block.statements))
+                    stmt.elif_blocks = [
+                        (cond, Block(_rewrite_stmts(blk.statements)))
+                        for cond, blk in stmt.elif_blocks
+                    ]
+                    out.append(stmt)
+                elif isinstance(stmt, (ForLoop, ForInLoop, WhileLoop, DoLoop, DoWhileLoop)):
+                    stmt.body = Block(_rewrite_stmts(stmt.body.statements))
+                    out.append(stmt)
+                elif isinstance(stmt, SwitchStatement):
+                    stmt.cases = [
+                        type(c)(c.value, Block(_rewrite_stmts(c.body.statements)))
+                        if hasattr(c, 'body') else c
+                        for c in stmt.cases
+                    ]
+                    out.append(stmt)
+                elif isinstance(stmt, TryBlock):
+                    stmt.try_body = Block(_rewrite_stmts(stmt.try_body.statements))
+                    stmt.catch_blocks = [
+                        (exc_type, exc_name, Block(_rewrite_stmts(blk.statements)))
+                        for exc_type, exc_name, blk in stmt.catch_blocks
+                    ]
+                    out.append(stmt)
+                else:
+                    out.append(stmt)
+            return out
+
+        # For void functions there are no return values to wrap, so just
+        # append the contract statements at the end of the body directly.
+        is_void = (
+            hasattr(return_type, 'base_type') and return_type.base_type == DataType.VOID
+        ) or str(return_type) == 'void'
+        if is_void:
+            body.statements = body.statements + copy.deepcopy(post_stmts)
+        else:
+            body.statements = _rewrite_stmts(body.statements)
+        return body
+
+    def contract_def(self) -> ContractDef:
+        """
+        contract_def -> 'contract' IDENTIFIER block ';'
+
+        Parses a contract definition and registers its statement block in
+        self._contracts so function_def() can inject it at parse time.
+        ContractDef is returned so it appears in the top-level statement
+        list (for diagnostics / future tooling); codegen ignores it.
+        Supports multiple comma-separated contracts on one function:
+            def foo(int x) -> int : NonZero, Positive { ... };
+        """
+        tok = self.current_token
+        self.consume(TokenType.CONTRACT)
+        name = self.consume(TokenType.IDENTIFIER).value
+        # Optional parameter list for parameterized contracts: contract Foo(a, b) { ... }
+        params = []
+        if self.expect(TokenType.LEFT_PAREN):
+            self.advance()
+            if not self.expect(TokenType.RIGHT_PAREN):
+                params.append(self.consume(TokenType.IDENTIFIER).value)
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    params.append(self.consume(TokenType.IDENTIFIER).value)
+            self.consume(TokenType.RIGHT_PAREN)
+        body = self.block()
+        self.consume(TokenType.SEMICOLON)
+        self._contracts[name] = (params, body)
+        return ContractDef(name, body, params).set_location(tok.line, tok.column)
+
     def function_def(self, calling_conv: Optional[str] = None) -> Union[FunctionDef, List[FunctionDef]]:
         """
-        function_def -> ('const')? ('volatile')? ('def' | calling_conv_kw) ('!!')? (IDENTIFIER | STRING_LITERAL) '(' parameter_list? ')' '->' type_spec (';' | block ';')
+        function_def -> ('const')? ('volatile')? ('def' | calling_conv_kw) ('!!')? (IDENTIFIER | STRING_LITERAL | F_STRING | I_STRING | STRINGIFY) '(' parameter_list? ')' '->' type_spec (';' | block ';')
         
         Now supports string literals as function names for mangled/decorated names:
             def "??@YAPAX?_FOO"()->void{};
+
+        Also supports f-string, i-string, and stringify names evaluated at compile time:
+            def f"{x}_{y}"() -> void {};
+            def i"{}":{x * 333;}() -> void {};
+            def $X() -> void {};
 
         Calling convention syntax (replaces 'def'):
             cdecl foo() -> void {};
@@ -799,12 +1437,40 @@ class FluxParser:
             no_mangle = True
             self.consume(TokenType.NO_MANGLE)
         
-        # Function name can be either an IDENTIFIER or a STRING_LITERAL
+        # Function name can be an IDENTIFIER, STRING_LITERAL, F_STRING, I_STRING, or STRINGIFY
         if self.expect(TokenType.STRING_LITERAL):
             # String literal function name (e.g., for mangled names)
             name = self.consume(TokenType.STRING_LITERAL).value
             # Note: The string literal includes quotes, you may want to strip them
             # name = name.strip('"')  # Uncomment if you want to remove quotes
+        elif self.expect(TokenType.F_STRING):
+            # F-string function name (e.g., def f"{x} {y}"() -> void)
+            # Stored as a FStringLiteral node; codegen evaluates it at compile time.
+            tok = self.current_token
+            name = self.parse_f_string(self.consume(TokenType.F_STRING).value).set_location(tok.line, tok.column)
+        elif self.expect(TokenType.I_STRING):
+            # I-string function name (e.g., def i"{}":{x * 333;}() -> void)
+            # Stored as a FStringLiteral node; codegen evaluates it at compile time.
+            tok = self.current_token
+            name = self.parse_i_string(self.consume(TokenType.I_STRING).value).set_location(tok.line, tok.column)
+        elif self.expect(TokenType.STRINGIFY):
+            # Stringify function name (e.g., def $X() -> void)
+            # Stored as a Stringify node; codegen evaluates it at compile time.
+            tok = self.current_token
+            self.advance()
+            if not self.expect(TokenType.IDENTIFIER):
+                self.error("Expected identifier after '$' in function name")
+            str_name = self.current_token.value
+            self.advance()
+            str_member = None
+            if self.expect(TokenType.DOT):
+                self.advance()
+                if self.expect(TokenType.IDENTIFIER):
+                    str_member = self.current_token.value
+                    self.advance()
+                else:
+                    self.error("Expected member name after '.' in stringify function name")
+            name = Stringify(str_name, str_member).set_location(tok.line, tok.column)
         elif self.expect(TokenType.IDENTIFIER):
             name = self.consume(TokenType.IDENTIFIER).value
         else:
@@ -866,9 +1532,31 @@ class FluxParser:
             while self.expect(TokenType.COMMA):
                 self.advance()  # consume comma
                 
-                # Each additional prototype has its own name (can also be string literal)
+                # Each additional prototype has its own name (can also be string literal, f-string, or i-string)
                 if self.expect(TokenType.STRING_LITERAL):
                     proto_name = self.consume(TokenType.STRING_LITERAL).value
+                elif self.expect(TokenType.F_STRING):
+                    tok = self.current_token
+                    proto_name = self.parse_f_string(self.consume(TokenType.F_STRING).value).set_location(tok.line, tok.column)
+                elif self.expect(TokenType.I_STRING):
+                    tok = self.current_token
+                    proto_name = self.parse_i_string(self.consume(TokenType.I_STRING).value).set_location(tok.line, tok.column)
+                elif self.expect(TokenType.STRINGIFY):
+                    tok = self.current_token
+                    self.advance()
+                    if not self.expect(TokenType.IDENTIFIER):
+                        self.error("Expected identifier after '$' in function name")
+                    _sn = self.current_token.value
+                    self.advance()
+                    _sm = None
+                    if self.expect(TokenType.DOT):
+                        self.advance()
+                        if self.expect(TokenType.IDENTIFIER):
+                            _sm = self.current_token.value
+                            self.advance()
+                        else:
+                            self.error("Expected member name after '.' in stringify function name")
+                    proto_name = Stringify(_sn, _sm).set_location(tok.line, tok.column)
                 elif self.expect(TokenType.IDENTIFIER):
                     proto_name = self.consume(TokenType.IDENTIFIER).value
                 else:
@@ -894,6 +1582,22 @@ class FluxParser:
             
             # Return the list of prototypes
             return [fd.set_location(tok.line, tok.column) for fd in prototypes]
+        # Resolve contract(s): def foo(int x) -> int : NonZero, LessThan(y,x) { ... }
+        contract_stmts = []
+        if self.expect(TokenType.COLON):
+            self.advance()
+            contract_name, call_args = self._parse_contract_ref()
+            if contract_name not in self._contracts:
+                self.error(f"Undefined contract '{contract_name}'")
+            contract_stmts.extend(self._resolve_contract(contract_name, parameters, call_args))
+            # Support multiple contracts: : NonZero, Positive
+            while self.expect(TokenType.COMMA):
+                self.advance()
+                contract_name, call_args = self._parse_contract_ref()
+                if contract_name not in self._contracts:
+                    self.error(f"Undefined contract '{contract_name}'")
+                contract_stmts.extend(self._resolve_contract(contract_name, parameters, call_args))
+
         is_prototype = False
         body = None
 
@@ -923,21 +1627,54 @@ class FluxParser:
             self.advance()
             body = Block([])
         else:
+            # Inside a trait body only prototypes are allowed — a missing ';' would
+            # otherwise fall through to block() and emit a confusing LEFT_BRACE error.
+            if self._in_trait and not self.expect(TokenType.LEFT_BRACE):
+                prev = self.tokens[self.position - 1] if self.position > 0 else None
+                self.error(
+                    f"Expected {TokenType.SEMICOLON.name}, got {self.current_token.type.name}",
+                    expected_type=TokenType.SEMICOLON,
+                    prev_token=prev,
+                )
             # If any real parameter lacks a name, this is an error for a definition
             for param in real_parameters:
                 if param.name is None:
                     self.error(f"Function definition requires parameter names, but parameter of type {param.type_spec} has no name")
             if self._function_depth > 0:
                 self.error(f"Illegal nested function definition '{name}': function definitions are not allowed inside another function body")
+            # Register parameters in the symbol table BEFORE parsing the body so
+            # that template inference inside the body (e.g. foo(a, 3) where 'a' is
+            # a parameter with a known concrete type) can resolve argument types via
+            # get_type_spec().  Without this, lookup returns None during body parsing
+            # and inference falls back to an unresolved FunctionCall.
+            for param in real_parameters:
+                if param.name:
+                    self.symbol_table.define(param.name, SymbolKind.VARIABLE, param.type_spec)
             self._function_depth += 1
             body = self.block()
             self._function_depth -= 1
+            # Prepend pre-contract statements to the top of the function body
+            if contract_stmts:
+                body.statements = contract_stmts + body.statements
+            # Post-contracts: } : ContractName, OtherContract;
+            # The contract body sees 'r' as the return value.
+            # Each return expr is rewritten to: r = expr; <asserts>; return r;
+            post_contract_stmts = []
+            if self.expect(TokenType.COLON):
+                self.advance()
+                post_name, post_call_args = self._parse_contract_ref()
+                if post_name not in self._contracts:
+                    self.error(f"Undefined post-contract '{post_name}'")
+                post_contract_stmts.extend(self._resolve_contract(post_name, parameters, post_call_args))
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    post_name, post_call_args = self._parse_contract_ref()
+                    if post_name not in self._contracts:
+                        self.error(f"Undefined post-contract '{post_name}'")
+                    post_contract_stmts.extend(self._resolve_contract(post_name, parameters, post_call_args))
+            if post_contract_stmts:
+                body = self._apply_post_contracts(body, return_type, post_contract_stmts)
             self.consume(TokenType.SEMICOLON)
-        
-        # Only add named real parameters to symbol table
-        for param in real_parameters:
-            if param.name:
-                self.symbol_table.define(param.name, SymbolKind.VARIABLE, param.type_spec)
         
         # If this is a template function, store it and return None (no immediate codegen)
         if template_params:
@@ -1054,6 +1791,8 @@ class FluxParser:
         Returns a single FunctionPointerDeclaration or a list when multiple
         declarations are chained with commas.
         """
+        if self._loop_depth > 0 and not self._in_for_init:
+            self.warn("pointer declaration inside a loop body, this will continually allocate new slots on the stack each iteration.")
         def _parse_one_fp() -> 'FunctionPointerDeclaration':
             """Parse a single name + type + optional initializer."""
             name = self.consume(TokenType.IDENTIFIER).value
@@ -1124,8 +1863,14 @@ class FluxParser:
         name = None
         if self.expect(TokenType.IDENTIFIER):
             name = self.consume(TokenType.IDENTIFIER).value
-        
-        return Parameter(name, type_spec).set_location(tok.line, tok.column)
+
+        # Optional default value: int x = 5
+        default_value = None
+        if name is not None and self.expect(TokenType.ASSIGN):
+            self.advance()
+            default_value = self.expression()
+
+        return Parameter(name, type_spec, default_value).set_location(tok.line, tok.column)
 
     def enum_def(self) -> Union[EnumDefStatement, List[EnumDefStatement]]:
         """
@@ -1182,10 +1927,49 @@ class FluxParser:
         self.consume(TokenType.SEMICOLON)
         return EnumDefStatement(EnumDef(name, values)).set_location(tok.line, tok.column)
 
+
+    def macro_def(self) -> macroDefStatement:
+        """
+        macro_def -> 'macro' IDENTIFIER '(' param_list? ')' '{' expression ';'? '}' ';'
+
+        param_list -> IDENTIFIER (',' IDENTIFIER)*
+
+        The trailing ';' inside the braces is a body terminator only.
+        It is consumed here and is NOT part of the stored body expression,
+        so it will not be injected when the macro is expanded at the call site.
+        """
+        tok = self.current_token
+        self.consume(TokenType.MACRO)
+        name = self.consume(TokenType.IDENTIFIER).value
+
+        # Parameter list
+        self.consume(TokenType.LEFT_PAREN)
+        params = []
+        if not self.expect(TokenType.RIGHT_PAREN):
+            params.append(self.consume(TokenType.IDENTIFIER).value)
+            while self.expect(TokenType.COMMA):
+                self.advance()
+                params.append(self.consume(TokenType.IDENTIFIER).value)
+        self.consume(TokenType.RIGHT_PAREN)
+
+        # Body: a single expression wrapped in braces
+        self.consume(TokenType.LEFT_BRACE)
+        body = self.expression()
+        # Trailing ';' is a body terminator -- consume silently, NOT stored in body
+        if self.expect(TokenType.SEMICOLON):
+            self.advance()
+        self.consume(TokenType.RIGHT_BRACE)
+        # Outer terminating ';'
+        self.consume(TokenType.SEMICOLON)
+
+        node = macroDef(name=name, params=params, body=body).set_location(tok.line, tok.column)
+        self._macros[name] = node   # register so call sites can be recognised
+        return macroDefStatement(macro_def=node).set_location(tok.line, tok.column)
+
     def union_def(self) -> UnionDefStatement:
         """
         union_def -> 'union' IDENTIFIER (';' | '{' union_member* '}' (IDENTIFIER)? ';')
-        
+
         Tagged union syntax: union name {} tagname;
         where tagname is an identifier that is an enum type
         """
@@ -1238,6 +2022,30 @@ class FluxParser:
         tok = self.current_token
         self.consume(TokenType.STRUCT)
         name = self.consume(TokenType.IDENTIFIER).value
+
+        # Parse optional template parameter list: struct name<T, U, ...>
+        # Use lookahead to confirm all angle-bracket contents are identifiers.
+        template_params = []
+        if self.expect(TokenType.LESS_THAN):
+            with self._lookahead():
+                is_template = False
+                self.advance()  # consume '<'
+                if self.expect(TokenType.IDENTIFIER):
+                    self.advance()
+                    while self.expect(TokenType.COMMA):
+                        self.advance()
+                        if not self.expect(TokenType.IDENTIFIER):
+                            break
+                        self.advance()
+                    if self.expect(TokenType.GREATER_THAN):
+                        is_template = True
+            if is_template:
+                self.advance()  # consume '<'
+                template_params.append(self.consume(TokenType.IDENTIFIER).value)
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    template_params.append(self.consume(TokenType.IDENTIFIER).value)
+                self.consume(TokenType.GREATER_THAN)
         
         # Check for comma-separated prototypes
         names = [name]
@@ -1360,7 +2168,13 @@ class FluxParser:
                 post_structs.append(self.consume(TokenType.IDENTIFIER).value)
 
         self.consume(TokenType.SEMICOLON)
-        return StructDef(name, members, base_structs, post_structs=post_structs, nested_structs=nested_structs).set_location(tok.line, tok.column)
+        sd = StructDef(name, members, base_structs, post_structs=post_structs,
+                       nested_structs=nested_structs, template_params=template_params)
+        sd.set_location(tok.line, tok.column)
+        if template_params:
+            self._template_structs[name] = (template_params, sd)
+            return None  # no immediate emission; instantiated on use
+        return sd
     
     def struct_member(self) -> Union[StructMember, List[StructMember]]:
         """
@@ -1414,6 +2228,7 @@ class FluxParser:
         name = self.consume(TokenType.IDENTIFIER).value
         self.consume(TokenType.LEFT_BRACE)
         prototypes = []
+        self._in_trait += 1
         while not self.expect(TokenType.RIGHT_BRACE):
             if self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
                 proto = self.function_def()
@@ -1423,6 +2238,7 @@ class FluxParser:
                     prototypes.append(proto)
             else:
                 self.error(f"Expected 'def' inside trait '{name}'")
+        self._in_trait -= 1
         self.consume(TokenType.RIGHT_BRACE)
         self.consume(TokenType.SEMICOLON)
         return TraitDef(name, prototypes).set_location(tok.line, tok.column)
@@ -1583,6 +2399,27 @@ class FluxParser:
                 self._object_init_params[name] = len(explicit_params)
                 break
 
+        # __expr is mandatory on every fully-defined object (not prototypes).
+        # Validate its signature if present; error if absent.
+        expr_method = next((m for m in methods if isinstance(m, FunctionDef) and m.name == '__expr'), None)
+        if expr_method is None:
+            self.error(
+                f"Object '{name}' is missing a __expr() method. "
+                f"Every object must define 'def __expr() -> <type> {{ ... }};' "
+                f"to specify its expression-context value."
+            )
+        else:
+            explicit_params = [p for p in expr_method.parameters if p.name != 'this']
+            if explicit_params:
+                self.error(
+                    f"Object '{name}': __expr() must take no parameters "
+                    f"(got {len(explicit_params)})"
+                )
+            if expr_method.return_type is None or expr_method.return_type.base_type == DataType.VOID:
+                self.error(
+                    f"Object '{name}': __expr() must have a non-void return type"
+                )
+
         obj_def = ObjectDef(name, methods, members, nested_objects, nested_structs, traits=traits).set_location(tok.line, tok.column)
         self._parsed_objects[name] = obj_def
         return obj_def
@@ -1617,6 +2454,7 @@ class FluxParser:
         structs = []
         objects = []
         enums = []
+        unions = []
         extern_blocks = []
         variables = []
         nested_namespaces = []
@@ -1711,6 +2549,13 @@ class FluxParser:
                     qualified_name = f"{current_namespace}__{enum.name}"
                     self.symbol_table.define(qualified_name, SymbolKind.TYPE)
                     self.symbol_table.define(enum.name, SymbolKind.TYPE)
+            elif self.expect(TokenType.UNION):
+                union_stmt = self.union_def()
+                union = union_stmt.union_def  # Unwrap UnionDefStatement -> UnionDef
+                unions.append(union)
+                qualified_name = f"{current_namespace}__{union.name}"
+                self.symbol_table.define(qualified_name, SymbolKind.TYPE)
+                self.symbol_table.define(union.name, SymbolKind.TYPE)
             elif self.expect(TokenType.OPERATOR):
                 op_func = self.operator_def()
                 functions.append(op_func)
@@ -1730,6 +2575,7 @@ class FluxParser:
                         existing_ns.structs.extend(nested_ns.structs)
                         existing_ns.objects.extend(nested_ns.objects)
                         existing_ns.enums.extend(nested_ns.enums)
+                        existing_ns.unions.extend(nested_ns.unions)
                         existing_ns.variables.extend(nested_ns.variables)
                         existing_ns.nested_namespaces.extend(nested_ns.nested_namespaces)
                         existing_ns.base_namespaces.extend(nested_ns.base_namespaces)
@@ -1757,7 +2603,7 @@ class FluxParser:
                     self.symbol_table.define(var_decl.name, SymbolKind.VARIABLE, var_decl.type_spec)
                 self.consume(TokenType.SEMICOLON)
             else:
-                self.error("Expected function, struct, object, namespace, or variable declaration")
+                self.error("Expected function, struct, object, namespace, enum, union, or variable declaration")
         
         self.consume(TokenType.RIGHT_BRACE)
         self.consume(TokenType.SEMICOLON)
@@ -1771,6 +2617,7 @@ class FluxParser:
             structs=structs,
             objects=objects,
             enums=enums,
+            unions=unions,
             extern_blocks=extern_blocks,
             variables=variables,
             nested_namespaces=nested_namespaces,
@@ -1858,6 +2705,24 @@ class FluxParser:
             custom_typename = base_type_result[1]
         else:
             base_type = base_type_result
+
+        # Template struct instantiation: MyStruct<int> or MyStruct<T, U>
+        # After parsing a custom typename, check if '<' follows and it names a template struct.
+        if custom_typename is not None and self.expect(TokenType.LESS_THAN):
+            if custom_typename in self._template_structs:
+                self.advance()  # consume '<'
+                type_names = []
+                type_specs_list = []
+                ts = self.type_spec()
+                type_names.append(self._type_system_to_mangle_str(ts))
+                type_specs_list.append(ts)
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    ts = self.type_spec()
+                    type_names.append(self._type_system_to_mangle_str(ts))
+                    type_specs_list.append(ts)
+                self.consume(TokenType.GREATER_THAN)
+                custom_typename = self._resolve_template_struct(custom_typename, type_names, type_specs_list)
 
         # Bit width and alignment for data types
         bit_width = None
@@ -2105,7 +2970,22 @@ class FluxParser:
                     self.advance()
                 else:
                     break
-            
+
+            # Handle template args: MyStruct<int> or MyStruct<T, U>
+            if self.expect(TokenType.LESS_THAN):
+                self.advance()  # consume '<'
+                depth = 1
+                while depth > 0 and not self.expect(TokenType.EOF):
+                    if self.expect(TokenType.LESS_THAN):
+                        depth += 1
+                    elif self.expect(TokenType.GREATER_THAN):
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    self.advance()
+                if self.expect(TokenType.GREATER_THAN):
+                    self.advance()
+
             # Handle optional bit-width/alignment specification {width:alignment}
             if self.expect(TokenType.LEFT_BRACE):
                 self.advance()
@@ -2121,6 +3001,10 @@ class FluxParser:
                         self.advance()
                 if self.expect(TokenType.RIGHT_BRACE):
                     self.advance()
+
+            # Consume leading pointer levels (mirrors type_spec order: ptr then bracket)
+            while self.expect(TokenType.MULTIPLY):
+                self.advance()
             
             # Handle array dimensions
             while self.expect(TokenType.LEFT_BRACKET):
@@ -2159,7 +3043,8 @@ class FluxParser:
             # Variable declaration should be followed by one of these tokens
             return self.expect(TokenType.ASSIGN, TokenType.SEMICOLON, 
                              TokenType.LEFT_PAREN, TokenType.LEFT_BRACE,
-                             TokenType.COMMA, TokenType.LEFT_BRACKET, TokenType.FROM)
+                             TokenType.COMMA, TokenType.LEFT_BRACKET, TokenType.FROM,
+                             TokenType.ADDRESS_ASSIGN)
 
     def variable_declaration_statement(self) -> Union[Statement, List[Statement]]:
         """
@@ -2172,6 +3057,8 @@ class FluxParser:
     
     def variable_declaration(self) -> Union[VariableDeclaration, TypeDeclaration, List[VariableDeclaration]]:
         tok = self.current_token
+        if self._loop_depth > 0 and not self._in_for_init:
+            self.warn("variable declaration inside a loop body - this will continually allocate new slots on the stack each iteration.")
         # Capture the raw identifier used as a type name before alias resolution wipes custom_typename
         raw_type_identifier = None
         if self.expect(TokenType.IDENTIFIER):
@@ -2248,14 +3135,27 @@ class FluxParser:
             initializers = []
             
             # Check if first variable has an initializer or FROM keyword
-            if self.expect(TokenType.FROM):
+            if self.expect(TokenType.ADDRESS_ASSIGN):
+                # `byte* x @= expr;` is sugar for `byte* x = @expr;`
+                addr_tok = self.current_token
+                self.advance()
+                rhs = self.expression()
+                initializers.append(AddressOf(rhs).set_location(addr_tok.line, addr_tok.column))
+            elif self.expect(TokenType.FROM):
                 # Syntactic sugar: Type name from source; => Type name = Type from source;
+                # Optionally: Type name from source!; suppresses invalidation of source.
                 self.advance()
                 source_expr = self.expression()
                 # Create StructRecast with the type from type_spec
                 if type_spec.custom_typename:
                     from fast import StructRecast, Identifier
                     recast = StructRecast(type_spec.custom_typename, source_expr)
+                    # `!` after RHS suppresses invalidation of the source reference
+                    if self.expect(TokenType.NOT):
+                        self.advance()
+                        recast.suppress_invalidate = True
+                    else:
+                        recast.suppress_invalidate = False
                     initializers.append(recast)
                 else:
                     self.error("FROM syntax requires a custom type (struct)")
@@ -2276,6 +3176,10 @@ class FluxParser:
                     return var_decl.set_location(tok.line, tok.column)
 
                 initializers.append(init_expr)
+                # Record byte* string-literal initialisers so ~$varname can splice them
+                if (isinstance(init_expr, StringLiteral) and
+                        type_spec.is_pointer and type_spec.base_type == DataType.BYTE):
+                    self._comptime_strings[name] = init_expr.value
             else:
                 initializers.append(None)
             
@@ -2304,12 +3208,18 @@ class FluxParser:
                             break
             elif self.expect(TokenType.COMMA):
                 # Mode: int x = 1, y = 2, z = 3; Ã¢â‚¬â€ each name has its own initializer
+                # Also handles: int* px @= x, px2 @= x; (address-assign sugar)
                 while self.expect(TokenType.COMMA):
                     self.advance()
                     var_name = self.consume(TokenType.IDENTIFIER).value
                     self.symbol_table.define(var_name, SymbolKind.VARIABLE, type_spec)
                     names.append(var_name)
-                    if self.expect(TokenType.ASSIGN):
+                    if self.expect(TokenType.ADDRESS_ASSIGN):
+                        addr_tok = self.current_token
+                        self.advance()
+                        rhs = self.expression()
+                        initializers.append(AddressOf(rhs).set_location(addr_tok.line, addr_tok.column))
+                    elif self.expect(TokenType.ASSIGN):
                         self.advance()
                         initializers.append(self.expression())
                     else:
@@ -2349,11 +3259,45 @@ class FluxParser:
                 
                 return var_decl.set_location(tok.line, tok.column)
     
-    def block_statement(self) -> Block:
+    def block_statement(self) -> Union[Block, IfStatement]:
         """
-        block_statement -> block
+        block_statement -> block (('if' '(' expression ')') ('else' block)? ';')?
+
+        Supports the postfix-if form:
+            { stmt1; stmt2; } if (cond);
+            { stmt1; stmt2; } if (cond) else { stmt3; };
+
+        A bare block-then-block is intentionally rejected here: the 'if'
+        keyword MUST follow the closing brace before any second block is
+        allowed (the else block).
         """
-        return self.block()
+        tok = self.current_token
+        body = self.block()
+
+        # Postfix 'if' on a block: `{ ... } if (cond);`
+        if self.expect(TokenType.IF):
+            self.advance()
+            self.consume(TokenType.LEFT_PAREN, "Expected '(' after 'if' in block-if statement")
+            condition = self.expression()
+            self.consume(TokenType.RIGHT_PAREN, "Expected ')' after condition in block-if statement")
+
+            # Optional else block — but NOT an immediate bare block (that would
+            # be ambiguous / wrong syntax).  Only 'else { ... }' is accepted.
+            else_block = None
+            if self.expect(TokenType.ELSE):
+                self.advance()
+                else_block = self.block()
+
+            self.consume(TokenType.SEMICOLON)
+            return IfStatement(condition, body, [], else_block).set_location(tok.line, tok.column)
+
+        # Plain anonymous block — no postfix condition.
+        # Reject an immediately following block: `{ ... } { ... }` is not valid.
+        if self.expect(TokenType.LEFT_BRACE):
+            self.error("Unexpected block after block statement. Did you mean '{ ... } if (cond);'?")
+
+        self.consume(TokenType.SEMICOLON)
+        return body
     
     def block(self) -> Block:
         tok = self.current_token
@@ -2376,37 +3320,40 @@ class FluxParser:
     def asm_statement(self, is_volatile: bool = False) -> ExpressionStatement:
         """
         asm_statement -> ('volatile')? 'asm' ASM_BLOCK (':' operand_list)? (':' operand_list)? (':' clobber_list)? ';'
+                       | ('volatile')? 'asm' ASM_BLOCK ';'   # shorthand when no outputs, inputs, or clobbers
         """
         tok = self.current_token
         # Check for volatile keyword if not already passed in
         if not is_volatile and self.expect(TokenType.VOLATILE):
             is_volatile = True
             self.advance()
-        
+
         self.consume(TokenType.ASM)
-        
+
         # Get the ASM block content
         asm_block_token = self.consume(TokenType.ASM_BLOCK)
         asm_body = asm_block_token.value
-        
-        # Parse optional output operands (first colon)
+
+        # If a ';' follows the block directly, skip all colon sections — no operands or clobbers.
         output_operands = ""
-        if self.expect(TokenType.COLON):
-            self.advance()
-            output_operands = self.parse_operand_list()
-        
-        # Parse optional input operands (second colon)
         input_operands = ""
-        if self.expect(TokenType.COLON):
-            self.advance()
-            input_operands = self.parse_operand_list()
-        
-        # Parse optional clobber list (third colon)
         clobber_list = ""
-        if self.expect(TokenType.COLON):
-            self.advance()
-            clobber_list = self.parse_clobber_list()
-        
+        if not self.expect(TokenType.SEMICOLON):
+            # Parse optional output operands (first colon)
+            if self.expect(TokenType.COLON):
+                self.advance()
+                output_operands = self.parse_operand_list()
+
+            # Parse optional input operands (second colon)
+            if self.expect(TokenType.COLON):
+                self.advance()
+                input_operands = self.parse_operand_list()
+
+            # Parse optional clobber list (third colon)
+            if self.expect(TokenType.COLON):
+                self.advance()
+                clobber_list = self.parse_clobber_list()
+
         self.consume(TokenType.SEMICOLON)
         
         # Construct constraints string for LLVM
@@ -2634,7 +3581,9 @@ class FluxParser:
             init = None
             if not self.expect(TokenType.SEMICOLON):
                 if self.is_variable_declaration():
+                    self._in_for_init = True
                     var_decl = self.variable_declaration()
+                    self._in_for_init = False
                     # If multiple declarations, wrap in a Block
                     if isinstance(var_decl, list):
                         init = Block(var_decl)
@@ -2814,7 +3763,7 @@ class FluxParser:
     
     def assert_statement(self) -> AssertStatement:
         """
-        assert_statement -> 'assert' '(' expression (',' CHAR)? ')' ';'
+        assert_statement -> 'assert' '(' expression (',' (STRING_LITERAL | F_STRING | I_STRING))? ')' ';'
         """
         tok = self.current_token
         self.consume(TokenType.ASSERT)
@@ -2824,7 +3773,14 @@ class FluxParser:
         message = None
         if self.expect(TokenType.COMMA):
             self.advance()
-            message = self.consume(TokenType.STRING_LITERAL).value
+            if self.expect(TokenType.F_STRING):
+                f_string_content = self.consume(TokenType.F_STRING).value
+                message = self.parse_f_string(f_string_content).set_location(tok.line, tok.column)
+            elif self.expect(TokenType.I_STRING):
+                i_string_content = self.consume(TokenType.I_STRING).value
+                message = self.parse_i_string(i_string_content).set_location(tok.line, tok.column)
+            else:
+                message = self.consume(TokenType.STRING_LITERAL).value
         
         self.consume(TokenType.RIGHT_PAREN)
         self.consume(TokenType.SEMICOLON)
@@ -2833,12 +3789,30 @@ class FluxParser:
     def defer_statement(self) -> DeferStatement:
         """
         defer_statement -> 'defer' expression ';'
+                         | 'defer' '{' statement* '}' ';'
         """
         tok = self.current_token
         self.consume(TokenType.DEFER)
+
+        if self.expect(TokenType.LEFT_BRACE):
+            # Block form: defer { stmt1; stmt2; };
+            self.advance()
+            statements = []
+            while not self.expect(TokenType.RIGHT_BRACE):
+                stmt = self.statement()
+                if stmt:
+                    if isinstance(stmt, list):
+                        statements.extend(stmt)
+                    else:
+                        statements.append(stmt)
+            self.consume(TokenType.RIGHT_BRACE)
+            self.consume(TokenType.SEMICOLON)
+            return DeferStatement(expression=None, body=statements).set_location(tok.line, tok.column)
+
+        # Single expression form: defer expr;
         expr = self.expression()
         self.consume(TokenType.SEMICOLON)
-        return DeferStatement(expr).set_location(tok.line, tok.column)
+        return DeferStatement(expression=expr, body=None).set_location(tok.line, tok.column)
 
     def escape_statement(self) -> EscapeStatement:
         """
@@ -2901,12 +3875,20 @@ class FluxParser:
         elif self.expect(TokenType.PLUS_ASSIGN, TokenType.MINUS_ASSIGN, TokenType.MULTIPLY_ASSIGN, 
                          TokenType.DIVIDE_ASSIGN, TokenType.MODULO_ASSIGN, TokenType.POWER_ASSIGN,
                          TokenType.XOR_ASSIGN, TokenType.BITXOR_ASSIGN, TokenType.BITXNOR_ASSIGN, TokenType.BITSHIFT_LEFT_ASSIGN, TokenType.BITSHIFT_RIGHT_ASSIGN,
-                         TokenType.BITAND_ASSIGN, TokenType.BITOR_ASSIGN, TokenType.BITNAND_ASSIGN, TokenType.BITNOR_ASSIGN):
+                         TokenType.BITAND_ASSIGN, TokenType.BITOR_ASSIGN, TokenType.BITNAND_ASSIGN, TokenType.BITNOR_ASSIGN,
+                         TokenType.OR_ASSIGN, TokenType.AND_ASSIGN):
             # Handle compound assignments
             op_token = self.current_token.type
             self.advance()
             value = self.assignment_expression()
             return CompoundAssignment(expr, op_token, value).set_location(tok.line, tok.column)
+        elif self.expect(TokenType.ADDRESS_ASSIGN):
+            # `x @= expr;` is sugar for `x = @expr;`
+            addr_tok = self.current_token
+            self.advance()
+            rhs = self.assignment_expression()
+            value = AddressOf(rhs).set_location(addr_tok.line, addr_tok.column)
+            return Assignment(expr, value).set_location(tok.line, tok.column)
         elif self.expect(TokenType.TERNARY_ASSIGN):
             # Handle ternary assignment: x ?= value  (assign value to x only if x == 0)
             self.advance()
@@ -2956,6 +3938,7 @@ class FluxParser:
             self.advance()
             right = self.logical_and_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
         
         return expr
     
@@ -2971,6 +3954,7 @@ class FluxParser:
             self.advance()
             right = self.logical_xor_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
         
         return expr
 
@@ -2986,28 +3970,40 @@ class FluxParser:
             self.advance()
             right = self.bitwise_or_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
 
         return expr
     
     def equality_expression(self) -> Expression:
         """
-        equality_expression -> chain_expression (('==' | '!=') chain_expression)*
+        equality_expression -> chain_expression (('==' | '!=' | 'in') chain_expression)*
+
+        'in' produces an InExpression (membership test): needle in haystack.
+        This allows 'x in y' in any expression context — if conditions, while
+        conditions, ternaries, assignments, etc. — mirroring the for-in syntax
+        but as a boolean operator rather than a loop head.
         """
         expr = self.chain_expression()
-        
-        while self.expect(TokenType.IS, TokenType.EQUAL, TokenType.NOT_EQUAL):
+
+        while self.expect(TokenType.IS, TokenType.EQUAL, TokenType.NOT_EQUAL, TokenType.IN):
             op_tok = self.current_token
-            if self.current_token.type == TokenType.EQUAL:
-                operator = Operator.EQUAL
-            elif self.current_token.type == TokenType.IS:
-                operator = Operator.EQUAL
-            elif self.current_token.type == TokenType.NOT_EQUAL:
-                operator = Operator.NOT_EQUAL
-            
-            self.advance()
-            right = self.chain_expression()
-            expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
-        
+            if self.current_token.type == TokenType.IN:
+                self.advance()
+                haystack = self.chain_expression()
+                expr = InExpression(needle=expr, haystack=haystack).set_location(op_tok.line, op_tok.column)
+            else:
+                if self.current_token.type == TokenType.EQUAL:
+                    operator = Operator.EQUAL
+                elif self.current_token.type == TokenType.IS:
+                    operator = Operator.EQUAL
+                else:  # NOT_EQUAL
+                    operator = Operator.NOT_EQUAL
+
+                self.advance()
+                right = self.chain_expression()
+                expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+                self._try_instantiate_template_op(operator.value, expr.left, expr.right)
+
         return expr
 
     def chain_expression(self) -> Expression:
@@ -3056,6 +4052,7 @@ class FluxParser:
             self.advance()
             right = self.bitwise_xor_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
         
         return expr
 
@@ -3074,6 +4071,7 @@ class FluxParser:
             self.advance()
             right = self.bitwise_and_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
         
         return expr
 
@@ -3092,6 +4090,7 @@ class FluxParser:
             self.advance()
             right = self.equality_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
         
         return expr
     
@@ -3115,6 +4114,7 @@ class FluxParser:
             self.advance()
             right = self.shift_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
         
         return expr
     
@@ -3134,6 +4134,7 @@ class FluxParser:
             self.advance()
             right = self.additive_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
         
         return expr
     
@@ -3173,6 +4174,7 @@ class FluxParser:
             self.advance()
             right = self.custom_op_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
         
         return expr
     
@@ -3197,6 +4199,7 @@ class FluxParser:
             self.advance()
             right = self.cast_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
         
         return expr
     
@@ -3328,24 +4331,6 @@ class FluxParser:
             self.advance()
             operand = self.unary_expression()
             return TieExpression(operand).set_location(tok.line, tok.column)
-        elif self.expect(TokenType.STRINGIFY):
-            # Stringify operator: $x or $x.member produces the name/value as a string
-            tok = self.current_token
-            self.advance()
-            if not self.expect(TokenType.IDENTIFIER):
-                raise SyntaxError(f"Expected identifier after '$'")
-            name = self.current_token.value
-            self.advance()
-            member = None
-            if self.expect(TokenType.DOT):
-                self.advance()
-                # Accept any identifier including the special '_' tag accessor
-                if self.expect(TokenType.IDENTIFIER):
-                    member = self.current_token.value
-                    self.advance()
-                else:
-                    raise SyntaxError(f"Expected member name after '.' in stringify expression")
-            return Stringify(name, member).set_location(tok.line, tok.column)
         else:
             return self.postfix_expression()
     
@@ -3424,6 +4409,37 @@ class FluxParser:
             return f"data_{sign}{ts.bit_width}"
         return base
 
+    def _resolve_template_struct(self, struct_name, type_names, type_specs=None):
+        """
+        Instantiate a template struct with concrete type arguments.
+        Returns the mangled concrete struct name.
+        """
+        if struct_name not in self._template_structs:
+            self.error(f"Unknown template struct '{struct_name}'")
+        template_params, template_sd = self._template_structs[struct_name]
+        if len(type_names) != len(template_params):
+            self.error(
+                f"Template struct '{struct_name}' expects {len(template_params)} "
+                f"type argument(s), got {len(type_names)}"
+            )
+        mangled = struct_name + "__" + "_".join(type_names)
+        if mangled not in self._emitted_template_struct_instances:
+            self._emitted_template_struct_instances.add(mangled)
+            mapping = {}
+            for param, tname, tspec in zip(
+                    template_params, type_names,
+                    type_specs or [None] * len(type_names)):
+                if tspec is not None:
+                    mapping[param] = tspec
+                else:
+                    mapping[param] = TypeSystem(
+                        base_type=DataType.DATA, custom_typename=tname)
+            concrete = self._substitute_template(template_sd, mapping)
+            concrete.name = mangled
+            concrete.template_params = []
+            self._template_struct_instances.append(concrete)
+        return mangled
+
     def _resolve_template_call(self, func_name, arg_type_names, arg_type_specs=None):
         """
         Given a template function name and a list of concrete type-name strings
@@ -3501,6 +4517,95 @@ class FluxParser:
 
         return func_name  # Call site uses the original name; overload resolution finds it
 
+    def _try_instantiate_template_op(self, op_symbol: str, left_expr, right_expr):
+        """
+        Called immediately after every BinaryOp creation.  If a template operator is
+        registered for `op_symbol` and we can infer concrete types from both operands,
+        instantiate the concrete FunctionDef so codegen's overload lookup finds it.
+        """
+        if op_symbol not in self._template_operators:
+            return
+        lts = self._infer_type_from_expr(left_expr)
+        rts = self._infer_type_from_expr(right_expr)
+        if lts is None or rts is None:
+            return
+        self._resolve_template_operator(op_symbol, [lts, rts])
+
+    def _resolve_template_operator(self, op_symbol: str, arg_type_specs: list):
+        """
+        Instantiate a template operator for the given concrete operand TypeSystems.
+        `op_symbol` is the raw operator symbol string (e.g. '+').
+        `arg_type_specs` is a list of two TypeSystem objects — one per operand.
+
+        A concrete FunctionDef is produced (via _substitute_template) and appended to
+        _template_instantiations so codegen can find it by normal overload resolution
+        inside visit_BinaryOp.  The BinaryOp AST node is left unchanged.
+        """
+        if op_symbol not in self._template_operators:
+            return
+        template_params, template_func = self._template_operators[op_symbol]
+        if len(template_params) != len(arg_type_specs):
+            return  # Arity mismatch — cannot instantiate
+
+        # Mirror the parser's non-builtin guard for concrete operator overloads:
+        # refuse to instantiate when all operand types are plain primitives.
+        # This prevents the overload from hijacking every built-in arithmetic
+        # operation in the standard library (e.g. every i + 1 loop increment).
+        from ftypesys import Operator as _Operator
+        _builtin_op_values = {op.value for op in _Operator}
+        if op_symbol in _builtin_op_values:
+            def _is_non_builtin(ts):
+                # DATA with no custom_typename is a fixed-width int alias (i32, u64,
+                # etc.) — treat it as primitive. Only structs, objects, named custom
+                # types, or pointers count as genuinely non-builtin.
+                return (ts.custom_typename is not None or
+                        ts.base_type in (DataType.STRUCT, DataType.OBJECT) or
+                        ts.is_pointer)
+            if not any(_is_non_builtin(ts) for ts in arg_type_specs):
+                return  # All-primitive instantiation — skip to avoid overriding builtins
+
+        # Build a stable mangle key so each unique pair of concrete types is only
+        # instantiated once.
+        type_names = [self._type_system_to_mangle_str(ts) for ts in arg_type_specs]
+        mangle_key = template_func.name + '__tmpl__' + '__'.join(type_names)
+
+        if mangle_key in self._emitted_template_operator_instances:
+            return
+        self._emitted_template_operator_instances.add(mangle_key)
+
+        # Build the substitution mapping: template param name -> concrete TypeSystem
+        mapping = {pname: ts for pname, ts in zip(template_params, arg_type_specs)}
+
+        concrete_func = self._substitute_template(template_func, mapping)
+        # Keep the original mangled function name (e.g. operator__plus); the
+        # LLVM-level overload uniqueness comes from distinct parameter types.
+        concrete_func.name = template_func.name
+        concrete_func.no_mangle = False
+        self._template_instantiations.append(concrete_func)
+
+    def _infer_type_from_expr(self, expr) -> 'TypeSystem | None':
+        """
+        Best-effort parse-time type inference for a BinaryOp operand.
+        Returns a TypeSystem if the type can be determined, else None.
+        """
+        from fast import Identifier, Literal, BinaryOp as _BinaryOp
+        if isinstance(expr, Identifier):
+            return self.symbol_table.get_type_spec(expr.name)
+        if isinstance(expr, Literal):
+            _dt_map = {
+                DataType.SINT:   TypeSystem(base_type=DataType.SINT,   is_signed=True),
+                DataType.UINT:   TypeSystem(base_type=DataType.UINT,   is_signed=False),
+                DataType.SLONG:  TypeSystem(base_type=DataType.SLONG,  is_signed=True),
+                DataType.ULONG:  TypeSystem(base_type=DataType.ULONG,  is_signed=False),
+                DataType.FLOAT:  TypeSystem(base_type=DataType.FLOAT),
+                DataType.DOUBLE: TypeSystem(base_type=DataType.DOUBLE),
+                DataType.CHAR:   TypeSystem(base_type=DataType.CHAR,   is_signed=True),
+                DataType.BOOL:   TypeSystem(base_type=DataType.BOOL),
+                DataType.BYTE:   TypeSystem(base_type=DataType.BYTE),
+            }
+            return _dt_map.get(expr.type)
+        return None
+
     def postfix_expression(self) -> Expression:
         """
         postfix_expression -> primary_expression (postfix_operator)*
@@ -3542,6 +4647,77 @@ class FluxParser:
             mangled = self._resolve_template_call(expr.name, type_names, type_specs)
             expr = FunctionCall(mangled, args).set_location(tok.line, tok.column)
 
+        # Handle implicit template call: foo(args) — infer <T, U, ...> from argument types.
+        # Only triggered when the function name is a known template function and the next
+        # token is '(' (no explicit '<' type list was written by the programmer).
+        elif (isinstance(expr, Identifier) and
+                expr.name in self._template_functions and
+                self.expect(TokenType.LEFT_PAREN)):
+            tok = self.current_token
+            self.consume(TokenType.LEFT_PAREN)
+            args = []
+            if not self.expect(TokenType.RIGHT_PAREN):
+                args = self.argument_list()
+            self.consume(TokenType.RIGHT_PAREN)
+
+            template_param_names, template_func = self._template_functions[expr.name]
+
+            # Build a mapping from template-param-name -> inferred TypeSystem by
+            # walking each declared parameter and matching its template param name
+            # against the corresponding call-site argument.
+            inferred: dict = {}  # template param name -> TypeSystem
+
+            for i, decl_param in enumerate(template_func.parameters):
+                if i >= len(args):
+                    break
+                param_ts = decl_param.type_spec
+                if param_ts is None:
+                    continue
+                # The declared parameter type names a template param when its
+                # custom_typename (or base_type string) appears in template_param_names.
+                param_tname = (
+                    param_ts.custom_typename if param_ts.custom_typename
+                    else (param_ts.base_type if isinstance(param_ts.base_type, str) else None)
+                )
+                if param_tname not in template_param_names:
+                    continue  # This param's type is concrete — no inference needed here.
+
+                # Try to derive the concrete TypeSystem from the call-site argument.
+                arg = args[i]
+                inferred_ts = None
+
+                if isinstance(arg, Identifier):
+                    # Look up the variable's declared type in the symbol table.
+                    inferred_ts = self.symbol_table.get_type_spec(arg.name)
+                elif isinstance(arg, Literal):
+                    # Map the Literal's DataType to a minimal TypeSystem.
+                    _dt_map = {
+                        DataType.SINT:   TypeSystem(base_type=DataType.SINT,   is_signed=True),
+                        DataType.UINT:   TypeSystem(base_type=DataType.UINT,   is_signed=False),
+                        DataType.SLONG:  TypeSystem(base_type=DataType.SLONG,  is_signed=True),
+                        DataType.ULONG:  TypeSystem(base_type=DataType.ULONG,  is_signed=False),
+                        DataType.FLOAT:  TypeSystem(base_type=DataType.FLOAT),
+                        DataType.DOUBLE: TypeSystem(base_type=DataType.DOUBLE),
+                        DataType.CHAR:   TypeSystem(base_type=DataType.CHAR,   is_signed=True),
+                        DataType.BOOL:   TypeSystem(base_type=DataType.BOOL),
+                        DataType.BYTE:   TypeSystem(base_type=DataType.BYTE),
+                    }
+                    inferred_ts = _dt_map.get(arg.type)
+
+                if inferred_ts is not None:
+                    inferred[param_tname] = inferred_ts
+
+            # Only proceed with implicit instantiation if every template param was resolved.
+            if len(inferred) == len(template_param_names):
+                type_names = [self._type_system_to_mangle_str(inferred[p]) for p in template_param_names]
+                type_specs = [inferred[p] for p in template_param_names]
+                mangled = self._resolve_template_call(expr.name, type_names, type_specs)
+                expr = FunctionCall(mangled, args).set_location(tok.line, tok.column)
+            else:
+                # Inference incomplete — emit a plain FunctionCall and let the
+                # codegen/type-checker surface a more descriptive error.
+                expr = FunctionCall(expr.name, args).set_location(tok.line, tok.column)
+
         while True:
             if self.expect(TokenType.LEFT_BRACKET):
                 # Array access or array slice [start:end]
@@ -3574,10 +4750,21 @@ class FluxParser:
                     args = self.argument_list()
                 self.consume(TokenType.RIGHT_PAREN)
                 if isinstance(expr, Identifier):
-                    expr = FunctionCall(expr.name, args).set_location(tok.line, tok.column)
+                    if expr.name in self._macros:
+                        # Expression macro invocation — build macroCall instead of FunctionCall
+                        expr = macroCall(name=expr.name, arguments=args).set_location(tok.line, tok.column)
+                    else:
+                        expr = FunctionCall(expr.name, args).set_location(tok.line, tok.column)
                 elif isinstance(expr, StringLiteral):
                     # String literal function name (for targeting mangled names like "??0Widget@@QEAA@AEBV0@@Z")
                     expr = FunctionCall(expr.value, args).set_location(tok.line, tok.column)
+                elif isinstance(expr, FStringLiteral):
+                    # F-string literal function name: f"{x} {y}"() — name resolved at codegen time
+                    expr = FunctionCall(expr, args).set_location(tok.line, tok.column)
+                elif isinstance(expr, Stringify):
+                    # Stringify call: $X() — name resolved at codegen time (like FStringLiteral)
+                    expr = FunctionCall(expr, args).set_location(tok.line, tok.column)
+                    
                 elif isinstance(expr, MemberAccess):
                     # Method call: obj.method() -> call obj_type.method with obj as first arg
                     method_name = f"{{obj_type}}.{expr.member}"
@@ -3636,6 +4823,13 @@ class FluxParser:
                     break
                 self.advance()
                 expr = UnaryOp(Operator.DECREMENT, expr, is_postfix=True).set_location(tok.line, tok.column)
+            elif self.expect(TokenType.NOT_NULL):
+                # Postfix not-null operator: expr!?
+                # Evaluates to true (i8 1) when operand is non-zero/non-null,
+                # false (i8 0) when it is zero/null.
+                tok = self.current_token
+                self.advance()
+                expr = NotNull(expr).set_location(tok.line, tok.column)
             elif self.expect(TokenType.AS):
                 # AS cast expression (postfix) - support all type casts
                 tok = self.current_token
@@ -3724,6 +4918,9 @@ class FluxParser:
                 lexer = FluxLexer(expr_text)
                 tokens = lexer.tokenize()
                 expr_parser = FluxParser(tokens)
+                # Propagate registered macros so call sites inside f-strings
+                # are recognised and produce macroCall instead of FunctionCall.
+                expr_parser._macros = self._macros
                 expression = expr_parser.expression()
                 
                 parts.append(expression)
@@ -3777,6 +4974,8 @@ class FluxParser:
                 lexer = FluxLexer(expr_text)
                 tokens = lexer.tokenize()
                 expr_parser = FluxParser(tokens)
+                # Propagate macros so call sites inside i-strings are recognised.
+                expr_parser._macros = self._macros
                 expressions.append(expr_parser.expression())
 
         # Build FStringLiteral parts, substituting {} placeholders positionally
@@ -3945,6 +5144,25 @@ class FluxParser:
             tok = self.current_token
             self.advance()
             return Literal(value=13, type=DataType.SINT).set_location(tok.line, tok.column)  # TypeOf.KIND_OBJECT
+        elif self.expect(TokenType.STRINGIFY):
+            # Stringify operator: $x or $x.member produces the name/value as a string.
+            # Parsed here (primary level) so that the postfix loop can handle ($X)(args)
+            # as a function call — e.g.  $X();  def $X() -> void {};
+            tok = self.current_token
+            self.advance()
+            if not self.expect(TokenType.IDENTIFIER):
+                raise SyntaxError("Expected identifier after '$'")
+            name = self.current_token.value
+            self.advance()
+            member = None
+            if self.expect(TokenType.DOT):
+                self.advance()
+                if self.expect(TokenType.IDENTIFIER):
+                    member = self.current_token.value
+                    self.advance()
+                else:
+                    raise SyntaxError("Expected member name after '.' in stringify expression")
+            return Stringify(name, member).set_location(tok.line, tok.column)
         elif self.expect(TokenType.SINT, TokenType.UINT, TokenType.FLOAT_KW, TokenType.DOUBLE_KW,
                          TokenType.CHAR, TokenType.BYTE, TokenType.BOOL_KW, TokenType.SLONG, TokenType.ULONG):
             # Built-in type convert expression: float(x), int(y), char(z), etc.
@@ -4327,7 +5545,8 @@ def main():
             print()
         
         # Parse
-        parser = FluxParser(tokens)
+        parser = FluxParser(tokens, source_lines=result.splitlines(keepends=True))
+        parser._line_map = preprocessor.line_map
         ast = parser.parse()
         
         if show_ast:
@@ -4341,7 +5560,7 @@ def main():
         print(f"Error: File '{filename}' not found")
         sys.exit(1)
     except ParseError as e:
-        print(f"Parse error: {e}")
+        print(e)
         sys.exit(1)
     except Exception as e:
         print(f"Unexpected error: {e}")

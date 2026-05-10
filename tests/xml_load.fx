@@ -65,7 +65,7 @@ def count_nodes(XMLNode* node, int depth, int* total, int* max_depth) -> void
     {
         if (i >= n) { break; };
         child = (XMLNode*)node.children.get(i);
-        if ((u64)child != 0) { count_nodes(child, depth + 1, total, max_depth); };
+        if ((u64)child != 0) { count_nodes(@child, depth + 1, total, max_depth); };
         i++;
     };
     return;

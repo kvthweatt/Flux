@@ -65,6 +65,11 @@ namespace xml
 			return;
 		};
 
+		def __expr() -> this
+		{
+			return this;
+		};
+
 		def _grow() -> bool
 		{
 			void*  nb;
@@ -165,7 +170,7 @@ namespace xml
 	};
 
 	// =========================================================================
-	// XMLAttrList - ordered attribute key/value pairs, keys heap-copied
+	// XMLAttrList - ordered attribute key/value pairs
 	// =========================================================================
 
 	object XMLAttrList
@@ -260,6 +265,11 @@ namespace xml
 				default {};
 			};
 			return;
+		};
+
+		def __expr() -> this
+		{
+			return this;
 		};
 
 		def _grow() -> bool
@@ -608,8 +618,6 @@ namespace xml
 	object XMLNode
 	{
 		int         type;
-		// tag: element tag name (zero-copy or arena-owned)
-		// text: text/comment/cdata/pi/doctype content
 		byte*       tag, text;
 		int         tag_len, text_len;
 		bool        self_closing;
@@ -653,6 +661,11 @@ namespace xml
 				default {};
 			};
 			return;
+		};
+
+		def __expr() -> this
+		{
+			return this;
 		};
 
 		def is_element() -> bool
@@ -866,8 +879,6 @@ namespace xml
 		XMLNode*                                    node_slab;
 		int                                         slab_remaining;
 
-		// text_len must be byte length of text (e.g. bytes_read from fread).
-		// No strlen call — caller provides length.
 		def __init(byte* text, int text_len, standard::memory::allocators::stdarena::Arena* a) -> this
 		{
 			this.src   = text;
@@ -879,6 +890,11 @@ namespace xml
 		def __exit() -> void
 		{
 			return;
+		};
+
+		def __expr() -> this
+		{
+			return this;
 		};
 
 		def ok() -> bool
@@ -1012,7 +1028,7 @@ namespace xml
 			return true;
 		};
 
-		// Decode XML entity at current pos into buf[j]. Advances pos past entity.
+		// Decode XML entity at current pos into a byte. Advances pos past entity.
 		// Returns byte written, or '?' on unknown entity.
 		def _decode_entity() -> byte
 		{
@@ -1276,7 +1292,6 @@ namespace xml
 					default { this.error = 1; return false; };
 				};
 			};
-			// Zero-copy comment content.
 			node.text     = @this.src[start];
 			node.text_len = slen;
 			this.pos      = this.pos + 3;  // skip '-->'
@@ -1311,7 +1326,6 @@ namespace xml
 					default { this.error = 1; return false; };
 				};
 			};
-			// Zero-copy CDATA content.
 			node.text     = @this.src[start];
 			node.text_len = slen;
 			this.pos      = this.pos + 3;  // skip ']]>'
@@ -1345,7 +1359,6 @@ namespace xml
 					default { this.error = 1; return false; };
 				};
 			};
-			// Zero-copy PI content (includes target name and data).
 			node.text     = @this.src[start];
 			node.text_len = slen;
 			this.pos      = this.pos + 2;  // skip '?>'
@@ -1384,8 +1397,7 @@ namespace xml
 		};
 
 		// Parse an opening or self-closing element tag.
-		// pos is after the initial '<'. Parses tag name, attributes, and
-		// recursively parses children until the matching closing tag.
+		// pos is after the initial '<'.
 		def _parse_element(XMLNode* node) -> bool
 		{
 			XMLNode* child;
@@ -1437,7 +1449,7 @@ namespace xml
 					case (1) { return false; }
 					default {};
 				};
-				// Store into attr list — key zero-copy, val zero-copy or arena.
+				// Store into attr list.
 				switch (!node.attrs.arena_set(attr_key, attr_val, attr_vlen, this.arena))
 				{
 					case (1) { this.error = 2; return false; }
@@ -1488,7 +1500,6 @@ namespace xml
 									case (1)
 									{
 										this._adv();
-										// Read and discard closing tag name — trust well-formed XML.
 										switch (!this._read_name(@close_tag, @close_len))
 										{
 											case (1) { return false; }
@@ -1577,7 +1588,6 @@ namespace xml
 										child = this._alloc_node();
 										switch ((u64)child == 0) { case (1) { return false; } default {}; };
 										switch (!this._parse_text(child)) { case (1) { return false; } default {}; };
-										// Skip all-whitespace text nodes.
 										switch (child.text_len > 0)
 										{
 											case (1)
@@ -1603,57 +1613,57 @@ namespace xml
 			return false;
 		};
 
-def parse(XMLNode* node) -> bool
-{
-    char c;
-    do
-    {
-        this._skip_ws();
-        switch (this.pos < this.len & this._peek() == '<')
-        {
-            case (1)
-            {
-                this._adv();
-                c = this._peek();
-                switch (c == '?')
-                {
-                    case (1)
-                    {
-                        this._adv();
-                        XMLNode pi_node;
-                        this._parse_pi(@pi_node);
-                        continue;   // ← was: break
-                    }
-                    default {};
-                };
-                switch (this._match_lit("!--\0", 3))
-                {
-                    case (1)
-                    {
-                        XMLNode cmt_node;
-                        this._parse_comment(@cmt_node);
-                        continue;   // ← was: break
-                    }
-                    default {};
-                };
-                switch (this._match_lit("!DOCTYPE\0", 8))
-                {
-                    case (1)
-                    {
-                        XMLNode dt_node;
-                        this._parse_doctype(@dt_node);
-                        continue;   // ← was: break
-                    }
-                    default {};
-                };
-                return this._parse_element(node);
-            }
-            default { break; };
-        };
-    };
-    this.error = 1;
-    return false;
-};
+		def parse(XMLNode* node) -> bool
+		{
+			char c;
+			do
+			{
+				this._skip_ws();
+				switch (this.pos < this.len & this._peek() == '<')
+				{
+					case (1)
+					{
+						this._adv();
+						c = this._peek();
+						switch (c == '?')
+						{
+							case (1)
+							{
+								this._adv();
+								XMLNode pi_node;
+								this._parse_pi(@pi_node);
+								continue;
+							}
+							default {};
+						};
+						switch (this._match_lit("!--\0", 3))
+						{
+							case (1)
+							{
+								XMLNode cmt_node;
+								this._parse_comment(@cmt_node);
+								continue;
+							}
+							default {};
+						};
+						switch (this._match_lit("!DOCTYPE\0", 8))
+						{
+							case (1)
+							{
+								XMLNode dt_node;
+								this._parse_doctype(@dt_node);
+								continue;
+							}
+							default {};
+						};
+						return this._parse_element(node);
+					}
+					default { break; };
+				};
+			};
+			this.error = 1;
+			return false;
+		};
 	};
 
 	// =========================================================================
@@ -1681,8 +1691,8 @@ def parse(XMLNode* node) -> bool
 				case (1)
 				{
 					buf[pos] = src[i];
-					pos = pos + 1;
-					i   = i + 1;
+					pos      = pos + 1;
+					i        = i + 1;
 				}
 				default { break; };
 			};
@@ -1691,7 +1701,6 @@ def parse(XMLNode* node) -> bool
 		return pos;
 	};
 
-	// Write exactly n bytes from src (for zero-copy slices with no null terminator).
 	def _wn(byte* buf, int pos, int cap, byte* src, int n) -> int
 	{
 		int i;
@@ -1702,8 +1711,8 @@ def parse(XMLNode* node) -> bool
 				case (1)
 				{
 					buf[pos] = src[i];
-					pos = pos + 1;
-					i   = i + 1;
+					pos      = pos + 1;
+					i        = i + 1;
 				}
 				default { break; };
 			};
@@ -1712,36 +1721,23 @@ def parse(XMLNode* node) -> bool
 		return pos;
 	};
 
-	// Write text content with XML entity encoding (&amp; &lt; &gt;).
 	def _we_text(byte* buf, int pos, int cap, byte* src, int n) -> int
 	{
 		int  i;
 		char c;
 		do
 		{
-			switch (i < n)
+			switch (i < n & pos < cap - 1)
 			{
 				case (1)
 				{
 					c = (char)src[i];
 					switch (c)
 					{
-						case (38)  // &
-						{
-							pos = _ws(buf, pos, cap, "&amp;\0");
-						}
-						case (60)  // <
-						{
-							pos = _ws(buf, pos, cap, "&lt;\0");
-						}
-						case (62)  // >
-						{
-							pos = _ws(buf, pos, cap, "&gt;\0");
-						}
-						default
-						{
-							pos = _wc(buf, pos, cap, c);
-						};
+						case (38) { pos = _ws(buf, pos, cap, "&amp;\0");  }
+						case (60) { pos = _ws(buf, pos, cap, "&lt;\0");   }
+						case (62) { pos = _ws(buf, pos, cap, "&gt;\0");   }
+						default   { pos = _wc(buf, pos, cap, c);          };
 					};
 					i = i + 1;
 				}
@@ -1751,36 +1747,23 @@ def parse(XMLNode* node) -> bool
 		return pos;
 	};
 
-	// Write attribute value with XML entity encoding (&amp; &lt; &quot;).
 	def _we_attr(byte* buf, int pos, int cap, byte* src, int n) -> int
 	{
 		int  i;
 		char c;
 		do
 		{
-			switch (i < n)
+			switch (i < n & pos < cap - 1)
 			{
 				case (1)
 				{
 					c = (char)src[i];
 					switch (c)
 					{
-						case (38)  // &
-						{
-							pos = _ws(buf, pos, cap, "&amp;\0");
-						}
-						case (60)  // <
-						{
-							pos = _ws(buf, pos, cap, "&lt;\0");
-						}
-						case (34)  // "
-						{
-							pos = _ws(buf, pos, cap, "&quot;\0");
-						}
-						default
-						{
-							pos = _wc(buf, pos, cap, c);
-						};
+						case (38) { pos = _ws(buf, pos, cap, "&amp;\0");  }
+						case (60) { pos = _ws(buf, pos, cap, "&lt;\0");   }
+						case (34) { pos = _ws(buf, pos, cap, "&quot;\0"); }
+						default   { pos = _wc(buf, pos, cap, c);          };
 					};
 					i = i + 1;
 				}
@@ -1799,11 +1782,7 @@ def parse(XMLNode* node) -> bool
 		byte*    av;
 		int      avl;
 
-		switch ((u64)node == 0)
-		{
-			case (1) { return pos; }
-			default {};
-		};
+		switch ((u64)node == 0) { case (1) { return pos; } default {}; };
 
 		switch (node.type)
 		{
@@ -1811,7 +1790,6 @@ def parse(XMLNode* node) -> bool
 			{
 				pos = _wc(buf, pos, cap, '<');
 				pos = _wn(buf, pos, cap, node.tag, node.tag_len);
-				// Attributes.
 				ak = 0;
 				do
 				{
@@ -1841,7 +1819,6 @@ def parse(XMLNode* node) -> bool
 					default
 					{
 						pos = _wc(buf, pos, cap, '>');
-						// Children.
 						n = node.children.len;
 						do
 						{

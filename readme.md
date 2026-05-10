@@ -8,23 +8,28 @@
 
 ## What is Flux?
 
-Flux is a new language that combines the performance and power of C with the readability of Python.   
+Flux is a new programming language that combines the performance and power of C with the readability of Python.   
 Flux resembles the C-family of languages.  
 It is neither C, nor a derivative of C.  
 It has a fundamentally different type system while still being C ABI compatible.
 
+## What does it look like?
+- Here's an example of shifting and masking, unavoidable in other languages turned into a one-liner in Flux
+<p align="center">
+<img width="800" height="449" alt="FluxRefactor-ezgif com-video-to-gif-converter" src="https://github.com/user-attachments/assets/21ef2566-f213-4e08-b601-780b45eba2e7" />
+</p>
 
 **Characteristics:**
-- Unique type system allowing creation of primitive integer types
+- Unique type system with endianness and alignment baked into types
 - Manual memory management
-- Compiler that does not fight you
-- First class data control features
+- Compiler that stays out of your way
+- First class data manipulation features
 - Consistent grammar and syntax constructs throughout
-- Rich operator set with distinct bitwise set
+- Rich operator collection with distinct bitwise set
 - Everything stack allocated unless otherwise specified
-- Everything is zero initialized unless otherwise specified
+- Everything is zero initialized on declaration unless otherwise specified
 - Custom infix operator support
-- Templates without SFINAE or noise
+- Templates without SFINAE or noise at call sites
 - Opt-in ownership without a borrow checker
 - Designed so you don't need to repeat yourself so much when coding
 
@@ -52,18 +57,18 @@ Flux is well-suited for:
 Flux is in active development. The syntax and grammar will not change. The [standard library](https://github.com/kvthweatt/FluxLang/tree/main/src/stdlib) is the current focus.
 
 **What exists:**
-- [Complete language specification](https://github.com/kvthweatt/FluxLang/blob/main/docs/Specs/language_specification.md)
+- [Language Specification](https://github.com/kvthweatt/FluxLang/blob/main/docs/Specs/language_specification.md)
 - [Keyword Reference](https://github.com/kvthweatt/FluxLang/blob/main/docs/keyword_reference.md)
-- A Flux [style guide](https://github.com/kvthweatt/FluxLang/blob/main/docs/style_guide.md)
-- Tutorials for [beginner](https://github.com/kvthweatt/FluxLang/blob/main/docs/learn_flux_intro.md) and [adept](https://github.com/kvthweatt/FluxLang/blob/main/docs/learn_flux_adept.md) programmers
+- A Flux [Style Guide](https://github.com/kvthweatt/FluxLang/blob/main/docs/style_guide.md)
+- Tutorials for [Beginner](https://github.com/kvthweatt/FluxLang/blob/main/docs/learn_flux_intro.md) and [Adept](https://github.com/kvthweatt/FluxLang/blob/main/docs/learn_flux_adept.md) Programmers
+- Base compiler ✅
+- An LSP ✅
+- A Package Manager (FPM) ✅
 
 **What's being built:**
-- Compiler Implementation ✅
-- Standard library (In-progress)
-- Build tooling
-- IDE (In-progress)
-- Package manager (In-progress)
-- LSP (In-progress)
+- Standard Library (expanding the existing)
+- Build Tooling
+- IDE
 
 ## Getting Involved
 
@@ -78,7 +83,11 @@ Flux is in active development. The syntax and grammar will not change. The [stan
 - **[Examples](examples/)** - Real-world Flux programs  
 - **[Windows Setup Guide](docs/SetupGuides/windows_setup_guide.md)**  
 - **[Linux Setup Guide](docs/SetupGuides/linux_setup_guide.md)** 
+- **[MacOS Setup Guide](docs/SetupGuides/macos_setup_guide.md)** 
 
+## Requirements:
+- Python v3.12 or higher
+- LLVM v21 or higher
 
 ## Star History
 
@@ -92,9 +101,9 @@ Flux is in active development. The syntax and grammar will not change. The [stan
 
 struct Packet
 {
-    unsigned data{8} type;
-    unsigned data{16} length;
-    unsigned data{32} timestamp;
+    data{8} type;
+    data{16} length;
+    data{32} timestamp;
 };
 
 def main() -> int

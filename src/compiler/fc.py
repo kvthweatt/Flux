@@ -17,6 +17,10 @@ from fast import *
 from fcodegen import visitor as _codegen_visitor
 from flogger import FluxLogger, FluxLoggerConfig, LogLevel
 from fconfig import *
+from fmacros import build_compiler_macros
+
+# Resolve compiler root: prefer FLUXC_SRCDIR env var, fall back to script location
+FLUXC_SRCDIR = Path(os.environ.get("FLUXC_SRCDIR", Path(__file__).parent)).resolve()
 
 def get_debug_level(level: str):
     match(level):
@@ -86,6 +90,9 @@ def resolve_llvm_tool(tool_name: str) -> str:
     Raises:
         FileNotFoundError: if the tool cannot be found by any method
     """
+    if tool_name is None or str(tool_name).lower() == "none":
+        tool_name = "llc"
+        
     exe = tool_name + ".exe"
 
     # 1. Explicit path from config
@@ -124,6 +131,7 @@ class FluxCompiler:
     def __init__(self, /, 
                  verbosity: int = None, 
                  logger: FluxLogger = None,
+                 llc_config: dict = None,
                  **logger_kwargs):
         """
         Initialize the Flux compiler with configurable logging
@@ -135,9 +143,10 @@ class FluxCompiler:
         """
         # Initialize logger
         self.debug_levels = set_debug_level()
-        logger_kwargs['level'] = min(0, 5)
+        logger_kwargs['level'] = min(verbosity if verbosity is not None else logger_kwargs.get('level', 3), 5)
         self.logger = FluxLoggerConfig.create_logger(**logger_kwargs)
 
+        self.llc_config = llc_config or {}
         self.temp_files = []
         
         # Store legacy verbosity for backward compatibility
@@ -153,7 +162,7 @@ class FluxCompiler:
         # Store config platform for DOS detection
         self.cfg_platform = config.get('operating_system', '')
 
-        if config['target'] == "bootloader":
+        if config.get('target') == "bootloader":
             # intentionally break this for the else coming after this.
             self.platform = None
             # heheh yeah qemu time
@@ -203,6 +212,37 @@ class FluxCompiler:
         debugger(self.debug_levels, [4,5,6,7,8], [f"Target platform: {self.platform}",
                                               f"Module triple: {self.module_triple}"])
 
+    def _get_llc_target_flags(self) -> list:
+        """
+        Build command-line flags for llc from llc_config, falling back to
+        flux_config.cfg values when the CLI didn't supply them.
+
+        CLI flags take precedence over config file values. Returns an
+        empty list if nothing is set, so llc uses its own defaults. 
+        """
+        flags = []
+
+        # --march
+        march = self.llc_config.get('march') or config.get('architecture', '').strip()
+        if march and march.lower() != 'none':
+            flags.append(f"-march={march}")
+        
+        # --mcpu
+        mcpu = self.llc_config.get('mcpu') or config.get('cpu', '').strip()
+        if mcpu and mcpu.lower() != 'none':
+            flags.append(f"-mcpu={mcpu}")
+        
+        # --mattr
+        mattr = self.llc_config.get('mattr')
+        if mattr and mattr.lower() != 'none':
+            flags.append(f"-mattr={mattr}")
+        
+        if flags:
+            self.logger.debug(f"LLC target flags: {' '.join(flags)}", "compiler")
+        
+        return flags
+
+
     def compile_file(self, filename: str, output_bin: str = None, extra_libs: list = None) -> str:
         """
         Compile a Flux source file to executable binary
@@ -218,95 +258,10 @@ class FluxCompiler:
         extra_libs = extra_libs or []
         try:
             self.logger.section(f"Preprocessing Flux file: {filename}", LogLevel.INFO)
-            self.predefined_macros = {
-                # Compiler identification
-                '__FLUX__': '1',
-                '__FLUX_MAJOR__': '1',
-                '__FLUX_MINOR__': '0',
-                '__FLUX_PATCH__': '0',
-                '__FLUX_VERSION__': '1',
-                
-                # LLVM backend info
-                # Remove when we're no longer using LLVM
-                '__LLVM__': '1',
-                
-                # Architecture detection
-                '__ARCH_X86__': '0',
-                '__ARCH_X86_64__': '0',
-                '__ARCH_ARM__': '0',
-                '__ARCH_ARM64__': '0',
-                '__ARCH_RISCV__': '0',
-                
-                # Platform detection
-                '__WINDOWS__': '0',
-                '__LINUX__': '0',
-                '__MACOS__': '0',
-                '__POSIX__': '0',
-                
-                # Feature detection
-                '__LITTLE_ENDIAN__': '0',  # Switch if desired.
-                '__BIG_ENDIAN__': '1',     # Always big-endian.
-                '__SIZEOF_PTR__': '8',     # Assume 64-bit.
-                '__SIZEOF_INT__': '4',     # Always 32-bit
-                '__SIZEOF_LONG__': '8',    # Always 64-bit
-                '__BYTE_WIDTH__': str(get_byte_width(config)),
-                
-                # Compilation mode
-                '__DEBUG__': '1' if config.get('debug', False) else '0',
-                '__RELEASE__': '0' if config.get('debug', True) else '1',
-                '__OPTIMIZE__': config.get('optimization_level', '0'),
-            }
-            
-            # Set platform-specific values
-            if self.platform == "Windows":
-                self.predefined_macros.update({
-                    '__WINDOWS__': '1',
-                    '__WIN32__': '1',
-                    '__WIN64__': '1' if 'x86_64' in self.module_triple else '0',
-                })
-            elif self.platform == "Darwin":  # macOS
-                self.predefined_macros.update({
-                    '__MACOS__': '1',
-                    '__APPLE__': '1',
-                    '__MACH__': '1',
-                    '__POSIX__': '1',
-                })
-            elif self.cfg_platform == "DOS":
-                self.predefined_macros.update({
-                    '__DOS__': '1',
-                    '__MSDOS__': '1',
-                    '__16BIT__': '1',
-                    '__I86__': '1',
-                    '__TINY__': '1' if config.get('dos_target') == 'com' else '0',
-                    '__SMALL__': '1' if config.get('dos_model') == 'small' else '0',
-                })
-            else:  # Linux/Unix
-                self.predefined_macros.update({
-                    '__LINUX__': '1',
-                    '__UNIX__': '1',
-                    '__POSIX__': '1',
-                    '__gnu_linux__': '1',
-                })
-            
-            # Set architecture
-            if 'x86_64' in self.module_triple or 'amd64' in self.module_triple:
-                self.predefined_macros.update({
-                    '__ARCH_X86_64__': '1',
-                    '__x86_64__': '1',
-                    '__amd64__': '1',
-                })
-            elif 'i386' in self.module_triple or 'i686' in self.module_triple:
-                self.predefined_macros.update({
-                    '__ARCH_X86__': '1',
-                    '__i386__': '1',
-                    '__i686__': '1',
-                })
-            elif 'arm64' in self.module_triple or 'aarch64' in self.module_triple:
-                self.predefined_macros.update({
-                    '__ARCH_ARM64__': '1',
-                    '__arm64__': '1',
-                    '__aarch64__': '1',
-                })
+            self.predefined_macros = build_compiler_macros(
+                module_triple=self.module_triple,
+                cfg_platform=self.cfg_platform,
+            )
             print("[COMPILER] Pre-defined / built in macros:\n")
             for key, value in self.predefined_macros.items():
                 print("[COMPILER]", key, value)
@@ -323,6 +278,10 @@ class FluxCompiler:
 
             if parser.parse_errors:
                 exit()
+
+            # Attach the line map to the module so codegen can produce accurate
+            # per-file error locations instead of global merged-source line numbers.
+            self.module._flux_line_map = parser._line_map
 
             #print("*"*40)
             #print("==== PARSER GENERATED SYMBOL TABLE ====")
@@ -347,7 +306,7 @@ class FluxCompiler:
                     self.logger.log_data(LogLevel.TRACE, "Generated LLVM IR", llvm_ir, "codegen")
                     
             except Exception as e:
-                self.logger.error(f"Code generation failed: {e}", "codegen")
+                #self.logger.error(f"Code generation failed: {e}", "codegen")
                 raise
 
             source_path = Path(filename)
@@ -392,6 +351,7 @@ class FluxCompiler:
                             "-O" + config['lto_optimization_level'],  # Aggressive optimization level
                             "-filetype=obj",                    # Direct object file output
                             "-mtriple=" + self.module_triple,   # Target triple
+                            *self._get_llc_target_flags(),   # march/mcpu/mattr
                             #"-march=" + config['architecture'], # Architecture
                             #"-mcpu=" + config['cpu'],           # Target CPU
                             "-enable-misched",                  # Enable machine instruction scheduler
@@ -423,11 +383,10 @@ class FluxCompiler:
                     result = subprocess.run(command_line, check=True, capture_output=True, text=True)
                     success = True
                 except Exception as e:
-                    print(result)
                     self.logger.error(f"{compiler}: {e}", "compiler")
                 
                 if not success:
-                    self.logger.error(f"{compiler} could compile LLVM IR", "compiler")
+                    self.logger.error(f"{compiler} could not compile LLVM IR", "compiler")
                     raise RuntimeError("Compilation failed - no suitable compiler found")
                     
             elif self.platform == "Windows":
@@ -435,6 +394,8 @@ class FluxCompiler:
                 
                 # Use configuration to determine desired compiler.
                 compiler = config.get('compiler')
+                if not compiler or compiler.lower() == "none":
+                    compiler = "llc"
                 # Resolve full path to the compiler so non-default LLVM installs work.
                 compiler_exe = resolve_llvm_tool(compiler)
                 # TODO:
@@ -484,8 +445,7 @@ class FluxCompiler:
                     "llc",
                     "-O3",                        # Maximum optimization level
                     #"-mtriple=x86_64-linux",      # Explicit target triple
-                    "-march=x86-64",
-                    "-mcpu=native",               # Optimize for current CPU
+                    *self._get_llc_target_flags(),   # march/mcpu/mattr
                     "-enable-misched",            # Enable machine instruction scheduler
                     "-enable-tail-merge",         # Merge similar tail code
                     "-disable-verify",            # Disable verification for speed
@@ -501,6 +461,14 @@ class FluxCompiler:
                     "-o",
                     str(asm_file)                 # Output to assembly file
                 ]
+
+                # If user/config didn't specify march/mcpu, fall back to x86-64/native
+                if not any(f.startswith('-march=') for f in cmd):
+                    cmd.insert(2, '--march=x86-64')
+                
+                if not any(f.startswith('-mcpu=') for f in cmd):
+                    cmd.insert(3, '-mcpu=native')
+
                 self.logger.debug(f"Running: {' '.join(cmd)}", "llc")
                 
                 try:
@@ -531,6 +499,16 @@ class FluxCompiler:
 
             self.temp_files.append(obj_file)
             self.logger.debug(f"Object file created: {obj_file}", "build")
+
+            # For Library
+            if getattr(self, "compile_only", False):
+                self.logger.success(f"Object file compiled: {obj_file}")
+                if output_bin:
+                    import shutil
+                    Path(output_bin).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy(obj_file, output_bin)
+                    return output_bin
+                return str(obj_file)
             
             # Legacy verbosity level 4 - show everything
             if self.verbosity == 4:
@@ -586,7 +564,7 @@ class FluxCompiler:
                     "/dynamicbase:no" if int(config['aslr']) == 1 else "",             # Disable ASLR (for smaller size)
                     #"/highentropyva:no" if int(config['no_default_libraries']) == 0 else "",           # Disable high entropy ASLR
                     "/nxcompat:no" if int(config['dep_compatibility']) == 1 else "",                # Disable DEP compatibility
-                    "/opt:lldlto=" + config['lto_optimization_level'],               # Aggressive LTO optimization if available
+                    f"/opt:lldlto={config.get('lto_optimization_level', 3)}",               # Aggressive LTO optimization if available
                     "/opt:lldltojobs=all" if int(config['all_cores_for_lto']) == 1 else "",         # Use all cores for LTO
                     str(obj_file),
                     # Only link essential libraries
@@ -622,6 +600,14 @@ class FluxCompiler:
                         print(f"\n\nRESULT\n{result}\n\n")
                 except subprocess.CalledProcessError as e:
                     self.logger.error(f"Linking failed: {e.stderr}", "linker")
+                    if "undefined symbol:" in e.stderr and \
+                            "standard__memory__allocators__stdheap__fmalloc__1__dataE1_ubits64__ret_dataE1_ubits64" in e.stderr:
+                        self.logger.error(
+                            "Undefined symbol: fmalloc\n"
+                            "  'heap' requires the standard memory allocator. Add '#import \"standard.fx\";' to your source file.",
+                            "linker"
+                        )
+                        raise RuntimeError("Missing import: standard.fx required for 'heap' keyword")
                     if config['linker'] == "lld-link":
                         self.logger.step(f"Falling back to clang...", LogLevel.INFO, "linker")
                         try:
@@ -723,7 +709,7 @@ class FluxCompiler:
                     #"/usr/lib/x86_64-linux-gnu/crtn.o",        # C runtime term
                     #"-lgcc",                                   # GCC runtime
                     #"-lgcc_eh",                                # GCC exception handling
-                    "-lwayland-client",
+                    #"-lwayland-client",
                     "--start-group",
                     "-lc",
                     "--end-group",
@@ -1059,6 +1045,109 @@ class FluxCompiler:
         self.temp_files.append(modified_asm_file)
         return modified_asm_file
 
+    def compile_library(self, filename: str, output_bin: str = None) -> str:
+        """
+        Compile a Flux source file to a shared library (DLL on Windows, .so on Linux, .dylib on macOS).
+        """
+        try:
+            self.logger.section(f"COMPILING {filename.upper()} AS SHARED LIBRARY", LogLevel.INFO)
+            base_name = Path(filename).stem
+
+            # ── Steps 1–4: preprocess / lex / parse / codegen ──────────────────
+            # Reuse compile_file's pipeline up to the object file by setting
+            # compile_only, then immediately clearing it so we can do our own link.
+            self.compile_only = True
+            try:
+                obj_path = self.compile_file(filename, output_bin=None)
+            finally:
+                self.compile_only = False
+
+            obj_file = Path(obj_path)
+
+            # ── Determine output name ───────────────────────────────────────────
+            if self.platform == "Windows":
+                out_name = output_bin or f"{base_name}.dll"
+                if not out_name.endswith(".dll"):
+                    out_name += ".dll"
+            elif self.platform == "Darwin":
+                out_name = output_bin or f"lib{base_name}.dylib"
+                if not out_name.endswith(".dylib"):
+                    out_name += ".dylib"
+            else:  # Linux / default
+                out_name = output_bin or f"lib{base_name}.so"
+                if not out_name.endswith(".so"):
+                    out_name += ".so"
+
+            output_dir = Path(f"build/{base_name}")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            out_path = output_dir / out_name
+
+            # ── Link ────────────────────────────────────────────────────────────
+            self.logger.step(f"Linking shared library: {out_name}", LogLevel.INFO, "linker")
+
+            if self.platform == "Windows":
+                linker_name = config.get('linker', 'lld-link')
+                try:
+                    linker_exe = resolve_llvm_tool(linker_name)
+                except FileNotFoundError as e:
+                    self.logger.error(str(e), "linker")
+                    raise
+
+                link_cmd = [
+                    linker_exe,
+                    "/DLL",                          # <-- This is the key flag
+                    "/NOENTRY",                      # DLLs don't need an entrypoint by default;
+                                                     # remove this line and add /ENTRY:DllMain
+                                                     # if your library defines DllMain
+                    "/nodefaultlib" if int(config.get('no_default_libraries', 0)) == 1 else "",
+                    "/opt:ref" if int(config.get('remove_unused_funcs', 0)) == 1 else "",
+                    "/opt:icf" if int(config.get('comdat_folding', 0)) == 1 else "",
+                    "/section:.text,ERW",
+                    f"/opt:lldlto={config.get('lto_optimization_level', 3)}",
+                    str(obj_file),
+                    "kernel32.lib",
+                    "ucrt.lib",
+                    "user32.lib",
+                    "gdi32.lib",
+                    f"/out:{out_path}",
+                    f"/implib:{output_dir / (base_name + '.lib')}",  # import lib for linking against
+                ]
+                # Strip empty strings left by disabled flags
+                link_cmd = [x for x in link_cmd if x]
+
+            elif self.platform == "Darwin":
+                link_cmd = [
+                    "clang",
+                    "-dynamiclib",
+                    "-o", str(out_path),
+                    str(obj_file),
+                ]
+
+            else:  # Linux
+                link_cmd = [
+                    "ld",
+                    "-shared",
+                    "-o", str(out_path),
+                    str(obj_file),
+                ]
+
+            self.logger.debug(f"Running: {' '.join(link_cmd)}", "linker")
+            try:
+                result = subprocess.run(link_cmd, check=True, capture_output=True, text=True)
+                self.logger.trace(f"Linker output: {result.stdout}", "linker")
+                if result.stderr:
+                    self.logger.warning(f"Linker stderr: {result.stderr}", "linker")
+            except subprocess.CalledProcessError as e:
+                self.logger.error(f"DLL linking failed: {e.stderr}", "linker")
+                raise RuntimeError(f"Library link step failed: {e.stderr}")
+
+            self.logger.success(f"Library compiled: {out_path}")
+            return str(out_path)
+
+        except Exception as e:
+            self.logger.error(f"Library compilation failed: {e}", "compiler")
+            raise
+
     def compile_bootloader(self, filename: str, output_bin: str = None) -> str:
         """
         Compile a Flux source file to a raw 16-bit bootloader binary
@@ -1148,6 +1237,9 @@ class FluxCompiler:
                 "-o",
                 str(asm_file)
             ]
+
+            if self.llc_config.get('mattr'):
+                llc_cmd.insert(-3, f"-mattr={self.llc_config['mattr']}")
             
             self.logger.debug(f"Running: {' '.join(llc_cmd)}", "llc")
             
@@ -1376,8 +1468,8 @@ def main():
     debug_file = None
     
     try:
-        # Create build directory if it doesn't exist
-        build_dir = Path.cwd() / "build"
+        # Create build directory under the compiler root, not CWD
+        build_dir = FLUXC_SRCDIR / "build"
         build_dir.mkdir(exist_ok=True)
         
         # Open debug.txt for writing
@@ -1430,7 +1522,7 @@ def main():
         
         compiler = FluxCompiler(verbosity=verbosity)
         try:
-            match (config['target']):
+            match (config.get('target', '')):
                 case "bootloader":
                     print("BOOTLOADER")
                     binary_path = compiler.compile_bootloader(input_file, output_bin)

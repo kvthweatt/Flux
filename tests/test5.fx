@@ -1,5 +1,5 @@
-#import "redstandard.fx";
-#import "redcrypto.fx";
+#import "standard.fx";
+#import "cryptography.fx";
 
 using standard::crypto::hashing::SHA256,
       standard::io::console;

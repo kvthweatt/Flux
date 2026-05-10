@@ -99,7 +99,7 @@ namespace standard
                     ctx.state[6] = 0x1F83D9ABu;
                     ctx.state[7] = 0x5BE0CD19u;
                     
-                    ctx.bitlen = (u64)0;
+                    ctx.bitlen = 0;
                     ctx.buflen = 0;
                 };
                 

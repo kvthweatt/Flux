@@ -1,1 +1,11 @@
-{}
+{
+  "test-pack": {
+    "version": "0.0.1",
+    "entry": "test_pack.fx",
+    "file": "C:\\Users\\kvthw\\Flux\\.fpm\\packages\\test-pack\\test_pack.fx",
+    "files": [
+      "C:\\Users\\kvthw\\Flux\\.fpm\\packages\\test-pack\\test_pack.fx"
+    ],
+    "source": "remote"
+  }
+}

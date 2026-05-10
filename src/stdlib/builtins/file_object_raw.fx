@@ -76,6 +76,11 @@ namespace standard
                     return;
                 };
 
+                def __expr() -> u64
+                {
+                    return (u64)@this.handle;
+                };
+
                 // Returns file size without changing current position
                 def get_size() -> int
                 {

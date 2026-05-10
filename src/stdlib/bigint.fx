@@ -448,9 +448,8 @@ namespace math
             uint* rd = @result.digits[0],
                  ad = @a.digits[0],
                  bd = @b.digits[0];
-            uint i, j;
+            uint i, j, k, res_len;
             u64 carry, prod;
-            uint res_len = 0;
             for (i = 0; i < a.length; i++)
             {
                 carry = 0;
@@ -460,7 +459,7 @@ namespace math
                     rd[i + j] = (uint)(prod & 0xFFFFFFFF);
                     carry = prod >> 32;
                 };
-                uint k = i + b.length;
+                k = i + b.length;
                 while (carry != 0 & k < 128)
                 {
                     prod = (u64)rd[k] + carry;
@@ -502,8 +501,8 @@ namespace math
                 bigint_copy(@bb, b);
             };
 
-            uint n = aa.length;
-            uint m = n >> 1;  // split point
+            uint n = aa.length,
+                 m = n >> 1;  // split point
 
             // Split aa into a0 (low m limbs) and a1 (high)
             BigInt a0, a1, b0, b1;
@@ -512,16 +511,15 @@ namespace math
             bigint_zero(@b0);
             bigint_zero(@b1);
 
-            uint* aad = @aa.digits[0];
-            uint* bbd = @bb.digits[0];
-            uint* a0d = @a0.digits[0];
-            uint* a1d = @a1.digits[0];
-            uint* b0d = @b0.digits[0];
-            uint* b1d = @b1.digits[0];
+            uint* aad = @aa.digits[0],
+                  bbd = @bb.digits[0],
+                  a0d = @a0.digits[0],
+                  a1d = @a1.digits[0],
+                  b0d = @b0.digits[0],
+                  b1d = @b1.digits[0];
 
-            uint i;
             // a0, b0: low m limbs
-            for (i = 0; i < m; i++)
+            for (uint i; i < m; i++)
             {
                 a0d[i] = aad[i];
                 b0d[i] = (i < bb.length) ? bbd[i] : 0;
@@ -532,8 +530,9 @@ namespace math
             bigint_normalize(@b0);
 
             // a1, b1: high limbs
-            uint a1_len = (aa.length > m) ? (aa.length - m) : 0;
-            uint b1_len = (bb.length > m) ? (bb.length - m) : 0;
+            uint a1_len = (aa.length > m) ? (aa.length - m) : 0,
+                 b1_len = (bb.length > m) ? (bb.length - m) : 0;
+            
             for (i = 0; i < a1_len; i++)
             {
                 a1d[i] = aad[m + i];
@@ -638,11 +637,10 @@ namespace math
         def bigint_shift_left_1(BigInt* num) -> void
         {
             uint* nd = @num.digits[0];
-            uint carry = 0;
-            uint new_carry;
-            uint len;
-            uint i;
-            for (i = 0; i < num.length; i++)
+            uint carry,
+                 new_carry,
+                 len;
+            for (uint i; i < num.length; i++)
             {
                 new_carry = nd[i] >> 31;
                 nd[i] = (nd[i] << 1) | carry;
@@ -664,9 +662,9 @@ namespace math
         def bigint_shift_right_1(BigInt* num) -> void
         {
             uint* nd = @num.digits[0];
-            uint carry = 0;
-            uint new_carry;
-            uint i = num.length;
+            uint carry,
+                 new_carry,
+                 i = num.length;
             while (i > 0)
             {
                 i--;
@@ -687,25 +685,28 @@ namespace math
             uint* rd = @result.digits[0];
 
             // Word-at-a-time shift for the bulk
-            uint word_shift = n / 32;
-            uint bit_shift  = n % 32;
+            uint word_shift = n / 32,
+                 bit_shift  = n % 32,
+                 old_len, new_len,
+                 i,
+                 src_idx,
+                 carry, new_carry;
 
             if (word_shift > 0)
             {
                 // Move existing limbs up by word_shift positions
-                uint old_len = result.length;
-                uint new_len = old_len + word_shift;
+                old_len = result.length;
+                new_len = old_len + word_shift;
                 if (new_len > 128) { new_len = 128; };
-                uint i = new_len;
+                i = new_len;
                 while (i > word_shift)
                 {
                     i--;
-                    uint src_idx = i - word_shift;
+                    src_idx = i - word_shift;
                     rd[i] = rd[src_idx];
                 };
                 // Zero the low word_shift limbs
-                uint j;
-                for (j = 0; j < word_shift; j++)
+                for (uint j; j < word_shift; j++)
                 {
                     rd[j] = 0;
                 };
@@ -715,9 +716,6 @@ namespace math
             // Remaining bit shift (0..31) in a single pass
             if (bit_shift > 0)
             {
-                uint carry = 0;
-                uint new_carry;
-                uint i;
                 for (i = 0; i < result.length; i++)
                 {
                     new_carry = rd[i] >> (32 - bit_shift);
@@ -744,8 +742,10 @@ namespace math
             uint* rd = @result.digits[0];
 
             // Word-at-a-time shift for the bulk
-            uint word_shift = n / 32;
-            uint bit_shift  = n % 32;
+            uint word_shift = n / 32,
+                 bit_shift  = n % 32,
+                 new_len, i,
+                 carry, new_carry;
 
             if (word_shift > 0)
             {
@@ -754,9 +754,8 @@ namespace math
                     bigint_zero(result);
                     return;
                 };
-                uint new_len = result.length - word_shift;
-                uint i;
-                for (i = 0; i < new_len; i++)
+                new_len = result.length - word_shift;
+                for (i; i < new_len; i++)
                 {
                     rd[i] = rd[i + word_shift];
                 };
@@ -771,9 +770,7 @@ namespace math
             // Remaining bit shift (0..31) in a single pass
             if (bit_shift > 0)
             {
-                uint carry = 0;
-                uint new_carry;
-                uint i = result.length;
+                i = result.length;
                 while (i > 0)
                 {
                     i--;
@@ -824,17 +821,18 @@ namespace math
             // ── Fast path: single-limb divisor ──────────────────────────
             if (abs_b.length == 1)
             {
-                uint* abs_a_d = @abs_a.digits[0];
-                uint* quot_d  = @quot.digits[0];
-                u64   divisor = (u64)abs_b_d[0];
-                u64   rem64   = 0;
+                uint* abs_a_d = @abs_a.digits[0],
+                      quot_d  = @quot.digits[0],
+                      rem_d;
+                u64   divisor = (u64)abs_b_d[0],
+                      rem64, cur;
                 bigint_zero(@quot);
 
                 uint qi = abs_a.length;
                 while (qi > 0)
                 {
                     qi--;
-                    u64 cur = (rem64 << 32) | (u64)abs_a_d[qi];
+                    cur = (rem64 << 32) | (u64)abs_a_d[qi];
                     quot_d[qi] = (uint)(cur / divisor);
                     rem64      = cur % divisor;
                 };
@@ -842,7 +840,7 @@ namespace math
                 bigint_normalize(@quot);
 
                 bigint_zero(@rem);
-                uint* rem_d = @rem.digits[0];
+                rem_d = @rem.digits[0];
                 rem_d[0]   = (uint)rem64;
                 rem.length = 1;
                 bigint_normalize(@rem);
@@ -867,29 +865,33 @@ namespace math
             uint* quot_d = @quot.digits[0];
 
             // Determine the bit length of abs_a
-            uint* abs_a_d2 = @abs_a.digits[0];
-            uint top_word  = abs_a_d2[abs_a.length - 1];
-            uint top_bits  = 0;
-            uint bp = 31;
+            uint* abs_a_d2 = @abs_a.digits[0],
+                  rem_d;
+            uint top_word  = abs_a_d2[abs_a.length - 1],
+                 top_bits, bit,
+                 bp = 31,
+                 total_bits,
+                 word_idx, bit_idx, the_bit,
+                 q_word, q_bit;
             while (bp > 0)
             {
                 if (((top_word >> bp) & 1) != 0) { break; };
                 bp--;
             };
-            uint total_bits = (abs_a.length - 1) * 32 + bp;
+            total_bits = (abs_a.length - 1) * 32 + bp;
 
-            uint* rem_d = @rem.digits[0];
+            rem_d = @rem.digits[0];
 
             // Process from MSB down, one bit at a time but with early-out
             // on remainder size to keep the inner loop short.
-            uint bit = total_bits;
+            bit = total_bits;
             do
             {
                 bigint_shift_left_1(@rem);
 
-                uint word_idx = bit / 32;
-                uint bit_idx  = bit % 32;
-                uint the_bit  = (abs_a_d2[word_idx] >> bit_idx) & 1;
+                word_idx = bit / 32;
+                bit_idx  = bit % 32;
+                the_bit  = (abs_a_d2[word_idx] >> bit_idx) & 1;
                 if (the_bit != 0)
                 {
                     rem_d[0] = rem_d[0] | 1;
@@ -898,8 +900,8 @@ namespace math
                 if (bigint_cmp_abs(@rem, @abs_b) >= 0)
                 {
                     bigint_sub_abs(@rem, @rem, @abs_b);
-                    uint q_word = bit / 32;
-                    uint q_bit  = bit % 32;
+                    q_word = bit / 32;
+                    q_bit  = bit % 32;
                     quot_d[q_word] = quot_d[q_word] | (1 << q_bit);
                     if (q_word + 1 > quot.length)
                     {
@@ -980,7 +982,6 @@ namespace math
             BigInt cur_base,
                    tmp,
                    rem;
-            uint i, j;
 
             bigint_one(result);
 
@@ -1000,12 +1001,13 @@ namespace math
             bigint_mod(@cur_base, base, m);
 
             uint* expd = @exp.digits[0];
-            uint exp_len = exp.length;
+            uint exp_len = exp.length,
+                 word;
 
-            for (i = 0; i < exp_len; i++)
+            for (uint i; i < exp_len; i++)
             {
-                uint word = expd[i];
-                for (j = 0; j < 32; j++)
+                word = expd[i];
+                for (uint j; j < 32; j++)
                 {
                     if ((word & 1) != 0)
                     {

@@ -65,6 +65,11 @@ namespace json
 			return;
 		};
 
+		def __expr() -> u64
+		{
+			return (u64)this.buf;
+		};
+
 		def _grow() -> bool
 		{
 			void*  nb;
@@ -231,6 +236,11 @@ namespace json
 				default {};
 			};
 			return;
+		};
+
+		def __expr() -> this
+		{
+			return this;
 		};
 
 		def _grow() -> bool
@@ -676,6 +686,11 @@ namespace json
 				default {};
 			};
 			return;
+		};
+
+		def __expr() -> this
+		{
+			return this;
 		};
 
 		def is_null()   -> bool
@@ -1142,6 +1157,11 @@ namespace json
 		def __exit() -> void
 		{
 			return;
+		};
+
+		def __expr() -> this
+		{
+			return this;
 		};
 
 		def ok() -> bool

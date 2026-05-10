@@ -145,9 +145,10 @@ def test_hm_resize() -> void
     defer m.__exit();
 
     // Insert 200 entries with keys "key_000" .. "key_199"
-    int n = 200;
-    int i;
+    int n = 200, i,
+        ones, tens, hundreds;
     byte[16] kbuf;
+    void* v;
 
     while (i < n)
     {
@@ -156,9 +157,9 @@ def test_hm_resize() -> void
         kbuf[1] = 101; // e
         kbuf[2] = 121; // y
         kbuf[3] = 95;  // _
-        int hundreds = i / 100;
-        int tens     = (i % 100) / 10;
-        int ones     = i % 10;
+        hundreds = i / 100;
+        tens     = (i % 100) / 10;
+        ones     = i % 10;
         kbuf[4] = (byte)(48 + hundreds);
         kbuf[5] = (byte)(48 + tens);
         kbuf[6] = (byte)(48 + ones);
@@ -178,14 +179,14 @@ def test_hm_resize() -> void
         kbuf[1] = 101;
         kbuf[2] = 121;
         kbuf[3] = 95;
-        int hundreds = i / 100;
-        int tens     = (i % 100) / 10;
-        int ones     = i % 10;
+        hundreds = i / 100;
+        tens     = (i % 100) / 10;
+        ones     = i % 10;
         kbuf[4] = (byte)(48 + hundreds);
         kbuf[5] = (byte)(48 + tens);
         kbuf[6] = (byte)(48 + ones);
         kbuf[7] = 0;
-        void* v = m.hm_get(@kbuf);
+        v = m.hm_get(@kbuf);
         if (v != (void*)i)
         {
             all_found = false;
@@ -210,8 +211,8 @@ def test_hmi_resize() -> void
     HashMapInt m(16);
     defer m.__exit();
 
-    int n = 500;
-    int i;
+    int n = 500, i;
+    void* v;
 
     while (i < n)
     {
@@ -225,7 +226,7 @@ def test_hmi_resize() -> void
     i = 0;
     while (i < n)
     {
-        void* v = m.hmi_get((u64)i);
+        v = m.hmi_get((u64)i);
         if (v != (void*)i)
         {
             all_found = false;
@@ -306,15 +307,16 @@ def test_hm_interleaved() -> void
     defer m.__exit();
 
     byte[16] kbuf;
-    int n = 100;
-    int i;
+    void* v;
+    int n = 100, i,
+        ones, tens, hundreds;
 
     // Insert 0..99
     while (i < n)
     {
-        int hundreds = i / 100;
-        int tens     = (i % 100) / 10;
-        int ones     = i % 10;
+        hundreds = i / 100;
+        tens     = (i % 100) / 10;
+        ones     = i % 10;
         kbuf[0] = (byte)(48 + hundreds);
         kbuf[1] = (byte)(48 + tens);
         kbuf[2] = (byte)(48 + ones);
@@ -329,9 +331,9 @@ def test_hm_interleaved() -> void
     {
         if (i % 2 == 0)
         {
-            int hundreds = i / 100;
-            int tens     = (i % 100) / 10;
-            int ones     = i % 10;
+            hundreds = i / 100;
+            tens     = (i % 100) / 10;
+            ones     = i % 10;
             kbuf[0] = (byte)(48 + hundreds);
             kbuf[1] = (byte)(48 + tens);
             kbuf[2] = (byte)(48 + ones);
@@ -348,14 +350,14 @@ def test_hm_interleaved() -> void
     i = 1;
     while (i < n)
     {
-        int hundreds = i / 100;
-        int tens     = (i % 100) / 10;
-        int ones     = i % 10;
+        hundreds = i / 100;
+        tens     = (i % 100) / 10;
+        ones     = i % 10;
         kbuf[0] = (byte)(48 + hundreds);
         kbuf[1] = (byte)(48 + tens);
         kbuf[2] = (byte)(48 + ones);
         kbuf[3] = 0;
-        void* v = m.hm_get(@kbuf);
+        v = m.hm_get(@kbuf);
         if (v != (void*)i)
         {
             odds_ok = false;
@@ -369,9 +371,9 @@ def test_hm_interleaved() -> void
     i = 0;
     while (i < n)
     {
-        int hundreds = i / 100;
-        int tens     = (i % 100) / 10;
-        int ones     = i % 10;
+        hundreds = i / 100;
+        tens     = (i % 100) / 10;
+        ones     = i % 10;
         kbuf[0] = (byte)(48 + hundreds);
         kbuf[1] = (byte)(48 + tens);
         kbuf[2] = (byte)(48 + ones);

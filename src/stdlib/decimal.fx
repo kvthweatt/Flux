@@ -403,12 +403,13 @@ namespace math
                    tmp;
             math::bigint::bigint_zero(@d.coefficient);
 
-            u32 chunk_acc   = 0;   // native accumulator for current chunk
-            i32 chunk_size  = 0;   // how many digits are in chunk_acc
+            u32 chunk_acc;    // native accumulator for current chunk
+            i32 chunk_size;   // how many digits are in chunk_acc
+            byte ch;
 
             while (s[idx] != 0 & s[idx] != 'e' & s[idx] != 'E')
             {
-                byte ch = s[idx];
+                ch = s[idx];
                 if (ch == '.')
                 {
                     in_frac = true;
@@ -481,7 +482,7 @@ namespace math
                 i32 exp_val = 0;
                 while (s[idx] != 0)
                 {
-                    byte ch = s[idx];
+                    ch = s[idx];
                     if (ch < '0' | ch > '9')
                     {
                         break;
@@ -1052,17 +1053,18 @@ namespace math
 
             // Step 3: apply the decimal exponent.
             // Clamp to [-308, +308] to stay within double range.
-            i32 exp = d.exponent;
+            i32 exp = d.exponent,
+                remaining,
+                step;
+            double factor;
             if (exp > 308)  { exp = 308;  };
             if (exp < -308) { exp = -308; };
 
             if (exp > 0)
             {
-                i32 remaining = exp;
+                remaining = exp;
                 while (remaining > 0)
                 {
-                    i32 step;
-                    double factor;
                     if (remaining >= 9)      { step = 9; factor = 1000000000.0; }
                     elif (remaining >= 8)    { step = 8; factor = 100000000.0;  }
                     elif (remaining >= 7)    { step = 7; factor = 10000000.0;   }
@@ -1078,11 +1080,9 @@ namespace math
             }
             elif (exp < 0)
             {
-                i32 remaining = -exp;
+                remaining = -exp;
                 while (remaining > 0)
                 {
-                    i32 step;
-                    double factor;
                     if (remaining >= 9)      { step = 9; factor = 1000000000.0; }
                     elif (remaining >= 8)    { step = 8; factor = 100000000.0;  }
                     elif (remaining >= 7)    { step = 7; factor = 10000000.0;   }
@@ -1162,11 +1162,16 @@ namespace math
             };
 
             // Build digit string into buf (most-significant chunk first)
-            i32 c = num_chunks;
+            i32 c = num_chunks,
+                td_count, ti, dg;
+            u32 power = 100000000,
+                chunk_val,
+                cv, cv2;
+            byte[9] tmp_digits;
             while (c > 0)
             {
                 c--;
-                u32 chunk_val = chunks[c];
+                chunk_val = chunks[c];
                 if (c == num_chunks - 1)
                 {
                     // First chunk: no leading zeros
@@ -1178,9 +1183,7 @@ namespace math
                     else
                     {
                         // Determine how many digits this chunk has
-                        byte[9] tmp_digits;
-                        i32 td_count = 0;
-                        u32 cv = chunk_val;
+                        cv = chunk_val;
                         while (cv > 0)
                         {
                             tmp_digits[td_count] = (byte)('0' + (cv % 10));
@@ -1188,7 +1191,7 @@ namespace math
                             cv = cv / 10;
                         };
                         // Reverse into buf
-                        i32 ti = td_count;
+                        ti = td_count;
                         while (ti > 0)
                         {
                             ti--;
@@ -1200,9 +1203,7 @@ namespace math
                 else
                 {
                     // Subsequent chunks: always exactly 9 digits
-                    u32 power = 100000000;
-                    i32 dg;
-                    u32 cv2 = chunk_val;
+                    cv2 = chunk_val;
                     for (dg = 0; dg < 9; dg++)
                     {
                         buf[buf_len] = (byte)('0' + (cv2 / power));
@@ -1229,13 +1230,11 @@ namespace math
             if (d.exponent >= 0)
             {
                 // Pure integer or trailing zeros: print digits then zeros
-                i32 pi;
-                for (pi = 0; pi < buf_len; pi++)
+                for (int pi; pi < buf_len; pi++)
                 {
                     print(buf[pi]);
                 };
-                i32 zi;
-                for (zi = 0; zi < d.exponent; zi++)
+                for (int zi; zi < d.exponent; zi++)
                 {
                     print('0');
                 };
@@ -1245,13 +1244,11 @@ namespace math
                 // All digits are fractional: 0.000...digits
                 print("0.\0");
                 i32 lead_zeros = -int_digits;
-                i32 lz;
-                for (lz = 0; lz < lead_zeros; lz++)
+                for (int lz; lz < lead_zeros; lz++)
                 {
                     print('0');
                 };
-                i32 di;
-                for (di = 0; di < buf_len; di++)
+                for (int di; di < buf_len; di++)
                 {
                     print(buf[di]);
                 };
@@ -1259,8 +1256,7 @@ namespace math
             else
             {
                 // Mixed: some integer digits, some fractional
-                i32 mi;
-                for (mi = 0; mi < int_digits; mi++)
+                for (int mi; mi < int_digits; mi++)
                 {
                     print(buf[mi]);
                 };
@@ -1290,19 +1286,21 @@ namespace math
 
             // Collect digit buffer same as decimal_print
             byte[1300] buf;
-            i32 buf_len = 0;
-
-            BigInt work;
-            BigInt divisor;
-            BigInt quot;
-            BigInt rem;
+            i32 buf_len, c, dg,
+                num_chunks,
+                td_count, cv, ti;
+            u32 chunk_val, cv2,
+                power = 100000000;
+            u32[145] chunks;
+            BigInt work,
+                   divisor,
+                   quot,
+                   rem;
             math::bigint::bigint_copy(@work, @d.coefficient);
             work.negative = false;
             math::bigint::bigint_from_uint(@divisor, 1000000000);
             u32* rem_d = @rem.digits[0];
 
-            u32[145] chunks;
-            i32 num_chunks = 0;
 
             while (!math::bigint::bigint_is_zero(@work))
             {
@@ -1312,11 +1310,13 @@ namespace math
                 math::bigint::bigint_copy(@work, @quot);
             };
 
-            i32 c = num_chunks;
+            byte[9] tmp_digits;
+
+            c = num_chunks;
             while (c > 0)
             {
                 c--;
-                u32 chunk_val = chunks[c];
+                chunk_val = chunks[c];
                 if (c == num_chunks - 1)
                 {
                     if (chunk_val == 0)
@@ -1326,16 +1326,14 @@ namespace math
                     }
                     else
                     {
-                        byte[9] tmp_digits;
-                        i32 td_count = 0;
-                        u32 cv = chunk_val;
+                        cv = chunk_val;
                         while (cv > 0)
                         {
                             tmp_digits[td_count] = (byte)('0' + (cv % 10));
                             td_count++;
                             cv = cv / 10;
                         };
-                        i32 ti = td_count;
+                        ti = td_count;
                         while (ti > 0)
                         {
                             ti--;
@@ -1346,9 +1344,7 @@ namespace math
                 }
                 else
                 {
-                    u32 power = 100000000;
-                    i32 dg;
-                    u32 cv2 = chunk_val;
+                    cv2 = chunk_val;
                     for (dg = 0; dg < 9; dg++)
                     {
                         buf[buf_len] = (byte)('0' + (cv2 / power));
@@ -1372,8 +1368,7 @@ namespace math
             if (buf_len > 1)
             {
                 print('.');
-                i32 di;
-                for (di = 1; di < buf_len; di++)
+                for (int di = 1; di < buf_len; di++)
                 {
                     print(buf[di]);
                 };

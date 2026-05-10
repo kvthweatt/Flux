@@ -226,6 +226,20 @@ class BinaryOp(Expression):
 
 
 @dataclass
+class InExpression(Expression):
+    """
+    Represents the 'x in y' membership-test expression.
+    Produces a boolean: true if 'needle' is found inside 'haystack'.
+    Used in if/while/ternary conditions and any other expression context.
+    """
+    needle: Expression
+    haystack: Expression
+
+    def __repr__(self) -> str:
+        return f"({self.needle} in {self.haystack})"
+
+
+@dataclass
 class UnaryOp(Expression):
     operator: Operator
     operand: Expression
@@ -491,6 +505,19 @@ class Stringify(Expression):
 
 
 @dataclass
+class Codify(Expression):
+    """~$x -- parse-time code injection operator.
+    The byte* variable x must be initialised with a string literal.
+    The parser re-lexes and re-parses that string, splicing the resulting
+    statements in place of the ~$x; statement. This node never reaches codegen."""
+    operand: Expression
+
+    def __repr__(self) -> str:
+        return f"~${self.operand!r}"
+
+
+
+@dataclass
 class AlignOf(Expression):
     target: Union[TypeSystem, Expression]
 
@@ -657,6 +684,12 @@ class IfExpression(Expression):
     condition: Expression
     else_expr: Optional[Expression] = None  # Can be another IfExpression for chaining
 
+    def __repr__(self) -> str:
+        if else_expr:
+            return f"{value_expr} if ({condition}) else {else_expr}"
+        else:
+            return f"{value_expr} if ({condition})"
+
 @dataclass
 class TernaryOp(Expression):
     """
@@ -688,6 +721,36 @@ class NullCoalesce(Expression):
     """
     left: Expression
     right: Expression
+
+
+@dataclass
+class NotNull(Expression):
+    """
+    Not-null operator: expr!?
+
+    Postfix unary operator that evaluates to True (i8 1) when the operand is
+    non-zero/non-null, and False (i8 0) when it is zero/null.
+
+    Semantics:
+        ptr!?          ->  ptr != 0   (boolean i1, zero-extended to i8)
+        x!?            ->  x  != 0
+        obj.field!?    ->  obj.field != 0
+
+    The operator sits in the postfix position because the subject is already
+    in mind when the assertion is made — mirroring natural language:
+        "The pointer isn't null!?"  ->  ptr!?
+
+    Codegen produces an LLVM icmp ne ... 0 (or fcmp one for floats), then
+    zext i1 to i8 so the result is a usable bool-width integer.
+
+    Example:
+        if (ptr!?) { use(ptr); };
+        bool live = node.next!?;
+    """
+    operand: Expression
+
+    def __repr__(self) -> str:
+        return f"{self.operand}!?"
     
 
 
@@ -742,9 +805,13 @@ class ContinueStatement(Statement):
 
 @dataclass
 class DeferStatement(Statement):
-    expression: 'Expression'
+    expression: 'Optional[Expression]'
+    body: 'Optional[List[Statement]]' = None  # block form: defer { ... };
 
     def __repr__(self) -> str:
+        if self.body is not None:
+            stmts = ' '.join(repr(s) for s in self.body)
+            return f"defer {{ {stmts} }};"
         return f"defer {self.expression};"
 
 
@@ -816,6 +883,7 @@ class AssertStatement(Statement):
 class Parameter(ASTNode):
     name: Optional[str] # Can be none for unnamed prototype parameters
     type_spec: TypeSystem
+    default_value: Optional['Expression'] = None  # e.g. the `5` in `int x = 5`
 
     def __repr__(self) -> str:
         if self.type_spec.custom_typename is not None:
@@ -1095,6 +1163,7 @@ class StructDef(ASTNode):
     nested_structs: List['StructDef'] = field(default_factory=list)
     storage_class: Optional[StorageClass] = None
     vtable: Optional[StructVTable] = None
+    template_params: List[str] = field(default_factory=list)
     
     def calculate_vtable(self, module: ir.Module) -> StructVTable:
             """Calculate struct layout and generate TLD."""
@@ -1258,7 +1327,17 @@ class ExternBlock(Statement):
         extern def function_name(params) -> return_type;
     """
     declarations: List['FunctionDef']  # List of function prototypes
-    
+
+
+class ExportBlock(ASTNode):
+    """
+    AST node for an 'export' block: functions made externally visible for linkage.
+    Same stucture as extern, except definitions go here.
+    """
+    definitions: List['FunctionDef'] # Collection of function definitions
+
+    def __init__(self, definitions):
+        self.definitions = definitions  # List[FunctionDef]
 
 # Namespace definition
 @dataclass
@@ -1268,6 +1347,7 @@ class NamespaceDef(ASTNode):
     structs: List[StructDef] = field(default_factory=list)
     objects: List[ObjectDef] = field(default_factory=list)
     enums: List[EnumDef] = field(default_factory=list)
+    unions: List['UnionDef'] = field(default_factory=list)
     extern_blocks: List[ExternBlock] = field(default_factory=list)
     variables: List[VariableDeclaration] = field(default_factory=list)
     nested_namespaces: List['NamespaceDef'] = field(default_factory=list)
@@ -1380,6 +1460,93 @@ class ObjectDefStatement(Statement):
 class NamespaceDefStatement(Statement):
     namespace_def: NamespaceDef
 
+
+
+# ============================================================================
+# Expression Macros (macro)
+# ============================================================================
+
+@dataclass
+class macroDef(ASTNode):
+    """
+    Expression macro definition.
+
+    Syntax:
+        macro someMac(a, b, c)
+        {
+            (a + b) ^ c;
+        };
+
+    The body is a single expression. The trailing ';' inside the braces is a
+    terminator only — it is consumed during parsing and is NOT injected into
+    the expanded expression.
+
+    macroDef nodes are registered in the parser's macro table at parse time
+    and never reach codegen directly. Invocation sites are replaced with
+    macroCall, which expands by substituting caller arguments for params.
+    """
+    name: str
+    params: List[str]          # parameter names, e.g. ['a', 'b', 'c']
+    body: Expression           # parsed body expression (params appear as Identifier nodes)
+
+    def __repr__(self) -> str:
+        params_str = ', '.join(self.params)
+        return f"macro {self.name}({params_str}) {{ {self.body} }}"
+
+
+@dataclass
+class macroCall(Expression):
+    """
+    Invocation of an expression macro.
+
+    Syntax (call site):
+        someMac(x, y + 1, z)
+
+    Expansion substitutes each argument expression for the corresponding
+    parameter Identifier inside the macro body. Expansion happens at
+    codegen (or in a pre-codegen pass) via deep-copy + substitution so
+    each call site gets an independent copy of the body.
+    """
+    name: str
+    arguments: List[Expression] = field(default_factory=list)
+
+    def __repr__(self) -> str:
+        args_str = ', '.join(repr(a) for a in self.arguments)
+        return f"{self.name}({args_str})  /* macro */"
+
+
+@dataclass
+class macroDefStatement(Statement):
+    """Wraps an macroDef so it can appear as a top-level statement."""
+    macro_def: macroDef
+
+
+# Contract definition
+@dataclass
+class ContractDef(Statement):
+    """
+    A named contract: a list of statements injected into a function body at compile time.
+
+    Syntax:
+        contract NonZero
+        {
+            assert(x > 0, "x must be positive");
+        };
+
+    Applied via colon syntax:
+        def foo(int x) -> int : NonZero { ... };
+
+    The parser expands the contract body statements into the top of the
+    function body at parse time. ContractDef nodes are stored in the
+    parser's _contracts table and never reach codegen directly.
+    """
+    name: str
+    body: Block  # statements to inject at the top of the function body
+    params: List[str] = field(default_factory=list)  # param names for parameterized contracts
+
+    def __repr__(self) -> str:
+        params_str = f'({', '.join(self.params)})' if self.params else ''
+        return f"contract {self.name}{params_str} {{ {self.body} }}"
 
 
 # Program root

@@ -5,7 +5,7 @@
 #endif;
 
 #ifndef FLUX_STANDARD_STRINGS
-#def FLUX_STANDARD_STRINGS 1;
+#import "string_utilities.fx";
 #endif;
 
 #ifdef FLUX_STANDARD_STRINGS
@@ -115,7 +115,7 @@ namespace standard
             def __init(byte* x) -> this
             {
                 this.value = x;
-                this.length = standard::strings::strlen(x);
+                this.length = strings::strlen(x);
                 return this;
             };
 
@@ -133,6 +133,11 @@ namespace standard
                 return;
             };
 
+            def __expr() -> byte*
+            {
+                return this.value;
+            };
+
             def val() -> byte*
             {
                 return this.value;
@@ -140,7 +145,7 @@ namespace standard
 
             def len() -> int
             {
-                return standard::strings::strlen(this.value);
+                return strings::strlen(this.value);
             };
 
             def set(byte* s) -> bool
@@ -148,7 +153,7 @@ namespace standard
                 try
                 {
                     this.value = s;
-                    this.length = (i32)standard::strings::strlen(s); // assignment needs to auto coerce
+                    this.length = (i32)strings::strlen(s); // assignment needs to auto coerce
                     return true;
                 }
                 catch()
@@ -158,7 +163,7 @@ namespace standard
                 return false;
             };
 
-                def clear() -> void
+            def clear() -> void
             {
                 this.value[0] = (byte)0;
                 this.length = 0;
@@ -172,6 +177,7 @@ namespace standard
             // ===== COMPARISON =====
             def equals(byte* s) -> bool
             {
+                //return (s is this.value);
                 return strcmp(s, this.value) == 0;
             };
 
@@ -189,7 +195,8 @@ namespace standard
             // ===== SEARCH =====
             def contains(byte* substr) -> bool
             {
-                return strstr(this.value, substr) != 0;
+                return (substr in this.value);
+                //return strstr(this.value, substr) != 0;
             };
 
             def startswith(byte* prefix) -> bool
@@ -313,7 +320,7 @@ namespace standard
                         return false;
                     };
                     this.value = newval;
-                    this.length = standard::strings::strlen(newval);
+                    this.length = strings::strlen(newval);
                     return true;
                 }
                 catch()
@@ -333,7 +340,7 @@ namespace standard
                         return false;
                     };
                     this.value = newval;
-                    this.length = standard::strings::strlen(newval);
+                    this.length = strings::strlen(newval);
                     return true;
                 }
                 catch()
@@ -352,13 +359,15 @@ namespace standard
             def replace_all(byte* find, byte* replace) -> byte*
             {
                 // Replace all occurrences
-                byte* result = manip::copy_string(this.value);
+                byte* result = manip::copy_string(this.value),
+                      temp;
+                int pos;
                 if (result == 0)
                 {
                     return (byte*)0;
                 };
 
-                int find_len = standard::strings::strlen(find);
+                int find_len = strings::strlen(find);
                 if (find_len == 0)
                 {
                     return result;
@@ -366,13 +375,13 @@ namespace standard
 
                 while (true)
                 {
-                    int pos = helpers::find_substring(result, find, 0);
+                    pos = helpers::find_substring(result, find, 0);
                     if (pos == -1)
                     {
                         break;
                     };
                     
-                    byte* temp = replace_first(result, find, replace);
+                    temp = replace_first(result, find, replace);
                     ffree(long(result));
                     result = temp;
                     
@@ -433,7 +442,7 @@ namespace standard
                 };
 
                 this.value = result;
-                this.length = (i32)standard::strings::strlen(result);
+                this.length = (i32)strings::strlen(result);
                 return true;
             };
 
@@ -472,7 +481,7 @@ namespace standard
                 };
 
                 this.value = result;
-                this.length = standard::strings::strlen(result);
+                this.length = strings::strlen(result);
                 return true;
             };
 
@@ -573,7 +582,7 @@ namespace standard
                 };
 
                 this.value = result;
-                this.length = (i32)standard::strings::strlen(result);
+                this.length = (i32)strings::strlen(result);
                 return true;
             };
 
@@ -849,13 +858,13 @@ namespace standard
 
             def printval() -> void
             {
-                standard::io::console::print(this.value, this.length);
+                io::console::print(this.value, this.length);
             };
 
             def println() -> void
             {
-                standard::io::console::print(this.value, this.length);
-                standard::io::console::print("\n\0",2);
+                io::console::print(this.value, this.length);
+                io::console::print("\n\0",2);
             };
         };
     };

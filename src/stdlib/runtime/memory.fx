@@ -91,6 +91,18 @@ def !!memcmp(void* a, void* b, size_t n) -> int
 
 
 #ifdef __LINUX__
+
+extern
+{
+    def !!
+        malloc(size_t size) -> void*,
+        free(void* ptr) -> void,
+        calloc(size_t count, size_t size) -> void*,
+        realloc(void* ptr, size_t new_size) -> void*,
+        mmap(u64, size_t, int, int, int, i64) -> u64,
+        munmap(u64, size_t)                   -> int;
+};
+///
 def !!malloc(size_t size) -> void*
 {
     // mmap(NULL, size+8, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
@@ -161,13 +173,7 @@ def !!realloc(void* ptr, size_t new_size) -> void*
     free(ptr);
     return new_ptr;
 };
-
-extern
-{
-    def !!
-        mmap(u64, size_t, int, int, int, i64) -> u64,
-        munmap(u64, size_t)                   -> int;
-};
+///
 #endif; //  /LINUX
 
 #ifdef __MACOS__

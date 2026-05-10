@@ -8,12 +8,58 @@ Contributors:
     Piotr Bednarski
 """
 
-import sys, traceback, faulthandler, inspect
+import sys, traceback, faulthandler, inspect, os
 from dataclasses import dataclass, field
 from typing import List, Any, Optional, Union, Dict, Tuple
 from enum import Enum
 from llvmlite import ir
 from flexer import TokenType
+
+
+def _typesys_src_loc(node, module: ir.Module) -> str:
+    """
+    Translate a node's global merged-source line number back to the original
+    filename and local line, using the ``_flux_line_map`` attached to *module*
+    by fc.py after preprocessing.
+
+    Returns a formatted block:
+
+        [filename.fx:6:5]
+            asdf a = 3;
+        ----^
+
+    Falls back to ``[global_line:col]`` with no source snippet when the map
+    or the original file is unavailable.
+    """
+    line = getattr(node, 'source_line', None)
+    col  = getattr(node, 'source_col',  1) or 1
+
+    line_map = getattr(module, '_flux_line_map', None) if module is not None else None
+
+    src_text  = None
+    loc_label = f"[{line}:{col}]"
+
+    if line_map and isinstance(line, int) and 1 <= line <= len(line_map):
+        filename, local_line = line_map[line - 1]
+        if filename:
+            loc_label = f"[{os.path.basename(filename)}:{local_line}:{col}]"
+            try:
+                with open(filename, 'r', encoding='utf-8') as fh:
+                    file_lines = fh.readlines()
+                if 1 <= local_line <= len(file_lines):
+                    src_text = file_lines[local_line - 1].rstrip('\n')
+            except OSError:
+                pass
+
+    if src_text is not None:
+        # Strip leading whitespace from the display line so tabs/spaces in the
+        # source don't push the caret further right than the column says.
+        stripped = src_text.lstrip()
+        indent = '    '  # 4-space prefix applied to the source line
+        pointer = '-' * (col - 1) + '^'
+        return f"{loc_label}\n\n{indent}{stripped}\n{pointer}"
+
+    return loc_label
 
 class Operator(Enum):
     # Regular operators
@@ -302,48 +348,60 @@ class SymbolTable:
         if no_mangle:
             return base_name
         #print("MANGLE_FUNCTION_NAME AFTER IF CHECK OR BASE_NAME == 'main'")
-        
-        # Start with base name
-        mangled = base_name
-        
-        # Add parameter count for quick filtering
-        mangled += f"__{len(parameters)}"
-        
-        # Add parameter type information
-        for param in parameters:
-            type_spec = param.type_spec
-            
-            # Handle custom type names
+
+        def _endian_suffix(type_spec) -> str:
+            """Return 'E1' for big-endian (default) or 'E0' for little-endian."""
+            return "E0" if getattr(type_spec, 'endianness', 1) == 0 else "E1"
+
+        def _mangle_type(type_spec) -> str:
+            """
+            Produce the mangled token for a single TypeSystem, including:
+              - endianness suffix on the base/custom type name  (E1/E0)
+              - _arr / _arrN qualifier
+              - _ptrN qualifier
+              - _sbitsN / _ubitsN suffix for DATA types
+            """
+            # Base or custom type name with endianness
             if type_spec.custom_typename:
-                # For custom types, use the type name (sanitized)
                 type_name = type_spec.custom_typename.replace(':', '_').replace('.', '_')
-                mangled += f"__{type_name}"
             else:
-                # For built-in types, use base type
-                mangled += f"__{type_spec.base_type.value}"
-            
-            # Add array/pointer qualifiers
+                type_name = type_spec.base_type.value
+
+            endian = _endian_suffix(type_spec)
+            token = f"{type_name}{endian}"
+
+            # Array qualifier
             if type_spec.is_array:
                 if type_spec.array_size:
-                    mangled += f"_arr{type_spec.array_size}"
+                    token += f"_arr{type_spec.array_size}"
                 else:
-                    mangled += "_arr"
-            
+                    token += "_arr"
+
+            # Pointer qualifier
             if type_spec.is_pointer:
-                mangled += f"_ptr{type_spec.pointer_depth}"
-            
-            # Add bit width for DATA types (with signedness)
+                token += f"_ptr{type_spec.pointer_depth}"
+
+            # DATA-type bit-width / signedness suffix (kept alongside endianness for
+            # full disambiguation of le32 vs be32 vs signed vs unsigned variants).
             if type_spec.base_type == DataType.DATA and type_spec.bit_width:
                 sign_prefix = "sbits" if type_spec.is_signed else "ubits"
-                mangled += f"_{sign_prefix}{type_spec.bit_width}"
-        
+                token += f"_{sign_prefix}{type_spec.bit_width}"
+
+            return token
+
+        # Start with base name
+        mangled = base_name
+
+        # Add parameter count for quick filtering
+        mangled += f"__{len(parameters)}"
+
+        # Add parameter type information
+        for param in parameters:
+            mangled += f"__{_mangle_type(param.type_spec)}"
+
         # Add return type information
-        if return_type_spec.custom_typename:
-            ret_name = return_type_spec.custom_typename.replace(':', '_').replace('.', '_')
-            mangled += f"__ret_{ret_name}"
-        else:
-            mangled += f"__ret_{return_type_spec.base_type.value}"
-        
+        mangled += f"__ret_{_mangle_type(return_type_spec)}"
+
         return mangled
 
     @staticmethod
@@ -689,11 +747,11 @@ class TypeResolver:
                                 if mangled in storage:
                                     return storage[mangled]
                 
-                elif entry.kind in (SymbolKind.STRUCT, SymbolKind.OBJECT, SymbolKind.UNION):
+                elif entry.kind in (SymbolKind.STRUCT, SymbolKind.OBJECT, SymbolKind.UNION, SymbolKind.ENUM):
                     if entry.llvm_type is not None:
                         return entry.llvm_type
                     # Fallback to _struct_types/_union_types storage
-                    for storage_name in ['_struct_types', '_union_types']:
+                    for storage_name in ['_struct_types', '_union_types', '_object_types', '_enum_types']:
                         if hasattr(module, storage_name):
                             storage = getattr(module, storage_name)
                             if typename in storage:
@@ -746,6 +804,14 @@ class TypeResolver:
                                 if param_spec.is_signed != arg_spec.is_signed:
                                     types_match = False
                                     break
+                            # Endianness must also match for DATA-typed parameters so that
+                            # le32 and be32 overloads don't collapse onto the same candidate.
+                            param_endian = getattr(param_spec, 'endianness', None)
+                            arg_endian   = getattr(arg_spec,   'endianness', None)
+                            if (param_endian is not None and arg_endian is not None
+                                    and param_endian != arg_endian):
+                                types_match = False
+                                break
 
                 if types_match:
                     return func
@@ -1048,6 +1114,8 @@ class TypeResolver:
                 elif entry.kind in (SymbolKind.STRUCT, SymbolKind.OBJECT, SymbolKind.UNION):
                     if entry.llvm_type is not None:
                         return entry.llvm_type
+                elif entry.kind == SymbolKind.TRAIT:
+                    raise TypeError(f"trait {typename} cannot be used in type contexts.")
         return TypeResolver.resolve_type(module, typename, current_namespace)
     
     @staticmethod
@@ -1112,7 +1180,7 @@ class TypeSystem:
 
     @staticmethod
     def get_llvm_type(type_spec: Union['TypeSystem', 'FunctionPointerType', DataType], module: ir.Module, 
-                      literal_value: Any = None, include_array: bool = False) -> ir.Type:
+                      literal_value: Any = None, include_array: bool = False, node=None) -> ir.Type:
         # Handle FunctionPointerType
         if hasattr(type_spec, 'return_type') and hasattr(type_spec, 'parameter_types'):
             ret_type = TypeSystem.get_llvm_type(type_spec.return_type, module)
@@ -1190,7 +1258,8 @@ class TypeSystem:
                 else:
                     base_type = resolved_type
             else:
-                raise NameError(f"TypeSystem.get_llvm_type: Unknown type: {type_spec.custom_typename}")
+                loc = _typesys_src_loc(node, module) if node is not None else f"[{getattr(node, 'source_line', '?')}:{getattr(node, 'source_col', '?')}]"
+                raise NameError(f"TypeSystem.get_llvm_type: Unknown type: {type_spec.custom_typename}\n{loc}")
         elif type_spec.base_type == DataType.SINT:
             base_type = ir.IntType(32)
         elif type_spec.base_type == DataType.UINT:
@@ -1458,6 +1527,32 @@ class VariableTypeHandler:
         # Import here to avoid circular dependency
         from fast import StringLiteral, ArrayLiteral
         
+        # Handle ArrayLiteral initializer for bare array types (e.g. int[] y = [...])
+        # where is_array is already True but array_size was left as None.
+        # Count elements; if the last element is a zero literal, exclude it from the
+        # logical size (NUL/sentinel terminator convention).
+        if (initial_value and isinstance(initial_value, ArrayLiteral)
+                and type_spec.is_array and type_spec.array_size is None):
+            from fast import Literal as _Lit
+            elems = initial_value.elements
+            elem_count = len(elems)
+            if elem_count and isinstance(elems[-1], _Lit) and elems[-1].value == 0:
+                elem_count -= 1
+            return TypeSystem(
+                base_type=type_spec.base_type,
+                is_signed=type_spec.is_signed,
+                is_const=type_spec.is_const,
+                is_volatile=type_spec.is_volatile,
+                is_local=type_spec.is_local,
+                bit_width=type_spec.bit_width,
+                alignment=type_spec.alignment,
+                endianness=type_spec.endianness,
+                is_array=True,
+                array_size=elem_count,
+                is_pointer=type_spec.is_pointer,
+                pointer_depth=getattr(type_spec, 'pointer_depth', 0),
+                custom_typename=type_spec.custom_typename)
+
         # Handle ArrayLiteral initializer for pointer types (e.g. noopstr* strarr = [...])
         # When a pointer type is initialized with an array literal, infer the array size
         # and convert the type to an array of the pointer's element type.
@@ -1477,6 +1572,7 @@ class VariableTypeHandler:
                         is_local=type_spec.is_local,
                         bit_width=type_spec.bit_width,
                         alignment=type_spec.alignment,
+                        endianness=type_spec.endianness,
                         is_array=True,
                         array_size=elem_count,
                         is_pointer=new_pointer_depth > 0,
@@ -1504,6 +1600,7 @@ class VariableTypeHandler:
                 is_local=type_spec.is_local,
                 bit_width=type_spec.bit_width or 8,
                 alignment=type_spec.alignment,
+                endianness=type_spec.endianness,
                 is_array=True,
                 array_size=inferred_size,
                 is_pointer=type_spec.is_pointer,
@@ -1521,6 +1618,7 @@ class VariableTypeHandler:
                         is_signed=False,
                         is_const=type_spec.is_const,
                         is_volatile=type_spec.is_volatile,
+                        endianness=type_spec.endianness,
                         bit_width=8,
                         alignment=type_spec.alignment,
                         is_array=True,
@@ -2449,6 +2547,56 @@ class ArrayTypeHandler:
                 
                 const_elements.append(llvm_val)
             
+            # StructLiteral elements in a global array (e.g. POINT[] glider_gun = [{1,5}, ...])
+            elif hasattr(elem, 'field_values') or hasattr(elem, 'positional_values'):
+                # Resolve the struct name from the LLVM element type
+                elem_struct_type = llvm_type.element
+                struct_name = None
+                if hasattr(module, '_struct_types'):
+                    for sname, stype in module._struct_types.items():
+                        if stype == elem_struct_type:
+                            struct_name = sname
+                            break
+                if struct_name is None:
+                    line = getattr(array_literal, 'source_line', 0)
+                    col  = getattr(array_literal, 'source_col',  0)
+                    elem_line = getattr(elem, 'source_line', line)
+                    elem_col  = getattr(elem, 'source_col',  col)
+                    raise ValueError(f"{elem_line}:{elem_col}: Cannot resolve struct type for array element")
+                # Seed struct_type on the StructLiteral so pack_struct_literal can resolve it
+                if getattr(elem, 'struct_type', None) is None:
+                    elem.struct_type = struct_name
+                # Build a constant struct value (builder=None is fine for all-constant structs)
+                vtable = module._struct_vtables.get(struct_name)
+                if vtable is None:
+                    line = getattr(array_literal, 'source_line', 0)
+                    col  = getattr(array_literal, 'source_col',  0)
+                    elem_line = getattr(elem, 'source_line', line)
+                    elem_col  = getattr(elem, 'source_col',  col)
+                    raise ValueError(f"{elem_line}:{elem_col}: Struct vtable not found for '{struct_name}'")
+                field_values = dict(getattr(elem, 'field_values', None) or {})
+                positional_values = list(getattr(elem, 'positional_values', None) or [])
+                # Map positional values to field names
+                if positional_values:
+                    for i, value in enumerate(positional_values):
+                        field_name_pos = vtable.fields[i][0]
+                        field_values[field_name_pos] = value
+                # Build constant field list
+                field_consts = []
+                for i, (fname, _, _, _) in enumerate(vtable.fields):
+                    if fname in field_values:
+                        fval_expr = field_values[fname]
+                        fval = fval_expr.codegen(None, module)
+                        # Cast to element type if needed
+                        expected = elem_struct_type.elements[i]
+                        if isinstance(fval, ir.Constant) and fval.type != expected:
+                            if isinstance(fval.type, ir.IntType) and isinstance(expected, ir.IntType):
+                                fval = ir.Constant(expected, fval.constant)
+                        field_consts.append(fval)
+                    else:
+                        field_consts.append(ir.Constant(elem_struct_type.elements[i], 0))
+                const_elements.append(ir.Constant(elem_struct_type, field_consts))
+
             else:
                 line = getattr(array_literal, 'source_line', 0)
                 col  = getattr(array_literal, 'source_col',  0)
@@ -2498,6 +2646,16 @@ class ArrayTypeHandler:
                     elem_val = ArrayTypeHandler.pack_array_to_integer(
                         builder, module, elem, llvm_type.element)
                 else:
+                    # Seed struct_type on StructLiteral elements so that bare struct
+                    # literals in local array initialisers have the required type context.
+                    if (getattr(elem, 'struct_type', None) is None and
+                            (hasattr(elem, 'field_values') or hasattr(elem, 'positional_values')) and
+                            isinstance(llvm_type.element, (ir.LiteralStructType, ir.IdentifiedStructType))):
+                        if hasattr(module, '_struct_types'):
+                            for sname, stype in module._struct_types.items():
+                                if stype == llvm_type.element:
+                                    elem.struct_type = sname
+                                    break
                     elem_val = elem.codegen(builder, module)
                     
                     # convert to pointer-to-element (for string literals in pointer arrays)
@@ -4140,7 +4298,7 @@ class AssignmentTypeHandler:
         return val
     
     @staticmethod
-    def handle_member_assignment(builder, module, target_obj_expr, member_name: str, val):
+    def handle_member_assignment(builder, module, target_obj_expr, member_name: str, val, value_expr=None):
         from fast import Identifier, MemberAccess
         
         # For member access, we need the pointer, not the loaded value
@@ -4219,6 +4377,18 @@ class AssignmentTypeHandler:
                 )
                 # Convert value type to match target member type if needed
                 member_type = member_ptr.type.pointee
+                # If the RHS is an ArrayLiteral and the member is an array type,
+                # bypass the generic codegen path (which produces pointer-of-pointers
+                # for nested array literals) and initialize directly into member_ptr.
+                # This fixes 2-D array assignment to struct members, e.g.:
+                #   t.a = [[1,2,3],[4,5,6],[7,8,9]];  // int[3][3] a
+                from fast import ArrayLiteral as _FastArrayLiteral
+                if (value_expr is not None and
+                        isinstance(value_expr, _FastArrayLiteral) and
+                        isinstance(member_type, ir.ArrayType)):
+                    ArrayTypeHandler.initialize_local_array(
+                        builder, module, member_ptr, member_type, value_expr)
+                    return member_ptr
                 # Array-widening assignment: assigning a smaller array (or noopstr pointer) into
                 # a larger array field.  Zero the destination, then memcpy the source bytes in.
                 # e.g. noopstr [12 x i8]* -> byte[256] ([256 x i8]) widens with zero-fill.
@@ -4564,7 +4734,10 @@ class AssignmentTypeHandler:
             # Handle void** case: array was over-loaded from T** to T*, so element_type
             # ended up as T (e.g. i8) but val is actually a pointer (e.g. i8*).
             # Bitcast elem_ptr to val.type* so the store matches.
-            if isinstance(val.type, ir.PointerType) and not isinstance(element_type, ir.PointerType):
+            # Guard: do NOT fire when val is a pointer-to-element-type (e.g. RCSprite* being
+            # assigned into an RCSprite* array — val needs to be loaded, not elem_ptr bitcast).
+            if (isinstance(val.type, ir.PointerType) and not isinstance(element_type, ir.PointerType)
+                    and str(val.type.pointee) != str(element_type)):
                 elem_ptr = builder.bitcast(elem_ptr, ir.PointerType(val.type), name="void_arr_elem_ptr")
             
             # Coerce val to match element_type (e.g. float literal -> double*, int width)
@@ -5205,14 +5378,18 @@ class StructTypeHandler:
         
         llvm_target_type = module._struct_types[target_type]
         
-        # If source is a pointer to an array, load it first
-        actual_source = source_value
+        # Zero-copy pointer path: source is already a raw pointer into the buffer
+        # (e.g. an i8* from a GEP into the source array).  Bitcast to Target* and
+        # return the pointer — no load, no alloca, no copy.
         if isinstance(source_value.type, ir.PointerType):
-            pointee = source_value.type.pointee
-            if isinstance(pointee, ir.ArrayType):
-                actual_source = builder.load(source_value, name="array_load")
-            else:
-                actual_source = source_value
+            if source_value.type.pointee == llvm_target_type:
+                return source_value  # already the right pointer type
+            casted_ptr = builder.bitcast(
+                source_value, ir.PointerType(llvm_target_type), name="recast_ptr")
+            return casted_ptr
+
+        # Non-pointer path: work with the value directly.
+        actual_source = source_value
         
         # Compile-time size check if source size is known
         if hasattr(actual_source.type, 'count'):

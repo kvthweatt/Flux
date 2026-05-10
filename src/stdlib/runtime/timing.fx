@@ -26,7 +26,9 @@ extern
 {
     def !!
         QueryPerformanceCounter(i64*) -> bool,
-        QueryPerformanceFrequency(i64*) -> bool;
+        QueryPerformanceFrequency(i64*) -> bool,
+        GetTickCount() -> u32,
+        Sleep(u32) -> void;
 };
 #endif;
 

@@ -63,6 +63,10 @@ using standard::memory::allocators::stdheap;
 #import "sys.fx";
 #endif;
 
+#ifndef FLUX_STANDARD_TIMING
+#import "timing.fx";
+#endif;
+
 #ifndef FLUX_STANDARD_IO
 #import "io.fx";
 #endif;
@@ -179,6 +183,10 @@ def !!_start() -> void
     noreturn;
 };
 #endif; // Linux
+
+#ifndef FLUX_STANDARD_EXCEPTIONS
+#import "exceptions.fx";
+#endif;
 
 #ifdef FLUX_RUNTIME
 #ifdef __WINDOWS__
@@ -297,7 +305,13 @@ def !!FRTStartup() -> int
     // Call the appropriate main overload
     if (argc > 1)
     {
-        return_code = main__2__int__byte_ptr2__ret_int(argc, argv);
+        // Check 32-bit / 64-bit here, call appropriate main
+        // 32 bit should call this one
+        // #ifdef ...
+        return_code = main__2__intE1__byteE1_ptr2__ret_intE1(argc, argv);
+        // #else
+        // 64 bit should call this one
+        // return_code = main__2__intE1__byteE1_ptr2__ret_longE1(argc, argv);
     }
     else
     {
@@ -330,7 +344,7 @@ def !!FRTStartup() -> int
     // Initialize the Flux standard heap allocator
     // For reference, see runtime/redallocators.fx
     standard::memory::allocators::stdheap::table_init();
-    int return_code = main();
+    int return_code = main__0__ret_intE1();
     if (return_code != 0)
     {
         // Handle error
@@ -346,7 +360,7 @@ def !!FRTStartup() -> int
 #ifdef __MACOS__
 def !!FRTStartup() -> int
 {
-    int return_code = main();
+    int return_code = main__0__ret_intE1();
     if (return_code != 0)
     {
         // Handle error
@@ -359,8 +373,3 @@ def !!FRTStartup() -> int
 };
 #endif; // __MACOS__
 #endif; // FLUX_RUNTIME
-///
-#ifndef FLUX_STANDARD_EXCEPTIONS
-#import "redexceptions.fx";
-#endif;
-///

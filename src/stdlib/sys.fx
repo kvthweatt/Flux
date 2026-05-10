@@ -20,7 +20,6 @@ global const int OS_MACOS = 3;
 extern
 {
     def !!
-        Sleep(u32) -> void,
         system(byte*) -> int,
         LoadLibraryA(byte*) -> void*,
         GetProcAddress(void*, byte*) -> void*,

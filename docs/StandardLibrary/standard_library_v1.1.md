@@ -119,12 +119,9 @@ stdlib/
 The `standard.fx` file serves as the primary import point for applications using the Flux Standard Library. It defines preprocessor guards and unconditionally imports `runtime.fx`, which pulls in the full runtime chain.
 
 **Features**:
-- Defines `FLUX_STANDARD` and `FLUX_REDUCED_SPECIFICATION` preprocessor flags
+- Defines `FLUX_STANDARD` preprocessor constant
 - Imports `runtime.fx` (which in turn imports `types.fx`, `memory.fx`, `allocators.fx`, `sys.fx`, `io.fx`, `ffifio.fx`, and the raw builtins)
 - Provides the stable import surface for all Flux programs
-
-**Note**: All libraries `use` themselves currently, so you do not need to perform `using`.  
-In a future update, a macro called `__NO_DEFAULT_USING__` will allow more programmer control.
 
 ---
 

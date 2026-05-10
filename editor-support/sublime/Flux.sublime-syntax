@@ -55,15 +55,15 @@ contexts:
       scope: storage.type.primitive.flux
 
     # Storage types
-    - match: '\b(enum|struct|object|union|trait|contract|singinit)\b'
+    - match: '\b(enum|struct|object|union|trait)\b'
       scope: storage.type.flux
 
     # Keywords (but NOT types)
-    - match: '\b(alignof|and|as|asm|assert|auto|break|case|catch|contract|compt|const|continue|def|defer|default|deprecate|do|elif|else|extern|false|for|from|goto|global|heap|if|in|is|label|local|namespace|noreturn|not|operator|or|private|public|register|return|signed|sizeof|stack|super|switch|this|throw|trait|true|try|typeof|union|unsigned|using|volatile|while|xor)\b'
+    - match: '\b(alignof|and|as|asm|assert|auto|break|case|catch|compt|const|continue|def|defer|default|deprecate|do|elif|else|extern|false|for|from|goto|global|heap|if|in|is|jump|label|local|namespace|noreturn|not|operator|or|private|public|register|return|signed|sizeof|stack|super|switch|this|throw|trait|true|try|typeof|union|unsigned|using|volatile|while|xor)\b'
       scope: keyword.control.flux
 
     # Type modifiers
-    - match: '\b(noinit|const|volatile|signed|unsigned|heap|stack|register)\b'
+    - match: '\b(escape|noinit|singinit|const|volatile|signed|unsigned|heap|stack|register|macro|contract)\b'
       scope: storage.modifier.flux
 
     # Special methods (dunder methods)
@@ -135,7 +135,7 @@ contexts:
       scope: keyword.operator.custom.flux
 
     # Operators - Custom operator usage (3+ character combinations that aren't standard)
-    - match: '(`!&=|`!\|=|`\^\^=|`&=|`\|=|<<=|>>=|!&|!\||<->|\^\^=|&=|\|=|%=|\^=|\+=|-=|\*=|/=|`!&|`!\||`\^\^|\+\+|--)'
+    - match: '(``|`!&=|`!\|=|`\^\^=|`&=|`\|=|<<=|>>=|!&|!\||<->|\^\^=|&=|\|=|%=|\^=|\+=|-=|\*=|/=|`!&|`!\||`\^\^|\+\+|--)'
       scope: keyword.operator.custom.flux
     # Operators - Comparison
     - match: '(==|!=|>=|<=|>|<)'
@@ -159,6 +159,8 @@ contexts:
 
     # Arrow for return types
     - match: '->'
+      scope: keyword.operator.arrow.flux
+    - match: '<~'
       scope: keyword.operator.arrow.flux
 
     # Brackets
@@ -196,18 +198,21 @@ contexts:
     - meta_scope: string.quoted.double.flux
     - match: '"'
       scope: punctuation.definition.string.end.flux
-      set: i_string_statement_block
-    - match: '\{'
+      pop: true
+    - match: '\{\}'
       scope: punctuation.section.interpolation.begin.flux
-      push: interpolation_scope
     - match: '\\[\\"nrt0]'
       scope: constant.character.escape.flux
+    - match: '[^{}"\\]+'
+      scope: string.quoted.double.flux
 
   f_string_body:
     - meta_scope: string.quoted.double.flux
     - match: '"'
       scope: punctuation.definition.string.end.flux
       pop: true
+    - match: '\\[\\"nrt0]'
+      scope: constant.character.escape.flux
     - match: '\{[^}]*\}'
       scope: meta.interpolation.flux
 

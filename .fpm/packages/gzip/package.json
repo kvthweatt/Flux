@@ -1,0 +1,18 @@
+{
+  "pack": "flux-gzip",
+  "version": "1.0.0",
+  "author": "Karac V. Thweatt",
+  "license": "MIT",
+  "repository": "https://github.com/kvthweatt/Flux",
+  "base_url": "https://raw.githubusercontent.com/kvthweatt/Flux/main/.fpm/packages/gzip",
+  "packages": {
+    "gzip": {
+      "version": "1.0.0",
+      "entry": "gzip.fx",
+      "path": "",
+      "description": "GZIP Flux implementation",
+      "dependencies":
+      {}
+    }
+  }
+}

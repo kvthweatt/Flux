@@ -1,0 +1,12 @@
+{
+  "packages": {
+    "test-pack": {
+      "version": "0.0.1",
+      "description": "A Flux package called test-pack",
+      "path": "",
+      "author": "Karac Thweatt",
+      "license": "MIT",
+      "entry": "test_pack.fx"
+    }
+  }
+}

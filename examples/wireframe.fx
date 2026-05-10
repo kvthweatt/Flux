@@ -1,17 +1,10 @@
-#import "standard.fx", "math.fx", "windows.fx", "opengl.fx", "allocators.fx";
+#import "standard.fx", "vectors.fx", "windows.fx", "opengl.fx", "allocators.fx";
 
 using standard::system::windows,
-      standard::math
-      standard::io::console;
-
-// ============================================================================
-// C runtime FFI
-// ============================================================================
-extern
-{
-    def !!
-        Sleep(u32) -> void;
-};
+      standard::vectors,
+      standard::math,
+      standard::io::console,
+      standard::io::file;
 
 // ============================================================================
 // MESH TYPES
@@ -24,8 +17,7 @@ struct Mesh
 {
     Vec3* verts;
     Face* faces;
-    int   vert_count;
-    int   face_count;
+    int   vert_count, face_count;
 };
 
 // ============================================================================
@@ -65,16 +57,19 @@ def load_obj(byte* path, Mesh* mesh) -> bool
     mesh.face_count = 0;
 
     byte[512] line;
-    int pos = 0;
+    byte ch;
+    int pos, line_len, read_pos, matched,
+        fa, fb, fc, dummy1, dummy2, si;
+    float vx, vy, vz;
     print("Before loop...\n\0");
 
     while (pos < bytes_read)
     {
-        int line_len = 0;
-        int read_pos = pos;
+        line_len = 0;
+        read_pos = pos;
         while (read_pos < bytes_read & buffer[read_pos] != '\n' & line_len < 511)
         {
-            byte ch = buffer[read_pos];
+            ch = buffer[read_pos];
             if (ch != '\r')
             {
                 line[line_len] = ch;
@@ -90,9 +85,9 @@ def load_obj(byte* path, Mesh* mesh) -> bool
         {
             if (mesh.vert_count < MAX_VERTS)
             {
-                float vx = 0.0;
-                float vy = 0.0;
-                float vz = 0.0;
+                vx = 0.0;
+                vy = 0.0;
+                vz = 0.0;
                 sscanf(line, "v %f %f %f\0", @vx, @vy, @vz);
                 mesh.verts[mesh.vert_count].x = vx;
                 mesh.verts[mesh.vert_count].y = vy;
@@ -105,13 +100,13 @@ def load_obj(byte* path, Mesh* mesh) -> bool
         {
             if (mesh.face_count < MAX_FACES)
             {
-                int fa = 0;
-                int fb = 0;
-                int fc = 0;
-                int dummy1 = 0;
-                int dummy2 = 0;
+                fa = 0;
+                fb = 0;
+                fc = 0;
+                dummy1 = 0;
+                dummy2 = 0;
 
-                int matched = sscanf(line, "f %d/%d/%d\0", @fa, @dummy1, @dummy2);
+                matched = sscanf(line, "f %d/%d/%d\0", @fa, @dummy1, @dummy2);
                 if (matched < 1)
                 {
                     matched = sscanf(line, "f %d\x2F\x2F%d\0", @fa, @dummy1, @dummy2);
@@ -122,7 +117,7 @@ def load_obj(byte* path, Mesh* mesh) -> bool
                 }
                 else
                 {
-                    int si = 2;
+                    si = 2;
                     while (line[si] != ' ' & line[si] != (byte)0) { si = si + 1; };
                     if (line[si] == ' ')
                     {
@@ -138,7 +133,7 @@ def load_obj(byte* path, Mesh* mesh) -> bool
                             si = si + 1;
                             dummy1 = 0;
                             dummy2 = 0;
-                            int matched = sscanf(@line[si], "%d/%d/%d\0", @fc, @dummy1, @dummy2);
+                            matched = sscanf(@line[si], "%d/%d/%d\0", @fc, @dummy1, @dummy2);
                             if (matched < 1) { matched = sscanf(@line[si], "%d\x2F\x2F%d\0", @fc, @dummy1, @dummy2); };
                             if (matched < 1) { sscanf(@line[si], "%d\0", @fc, @dummy1, @dummy2); };
                         };
@@ -249,18 +244,9 @@ def main(int argc, byte** argv) -> int
     DWORD draw_color = draw_colors[dc_enum.BLUE];
     DWORD bg_color = draw_colors[dc_enum.BLACK];
 
-    float sx  = 0.0;
-    float cxr = 0.0;
-    float sy  = 0.0;
-    float cyr = 0.0;
-    int i  = 0;
-    int fi = 0;
-    int a  = 0;
-    int b  = 0;
-    int fv = 0;
-    Vec3 v;
-    Vec3 rx;
-    Vec3 ry;
+    float sx, sy, cxr, cyr;
+    int a, b, i, fi, fv;
+    Vec3 v, rx, ry;
     Canvas c(win.handle, win.device_context);
 
     while (win.process_messages())

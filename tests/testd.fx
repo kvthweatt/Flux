@@ -2,13 +2,13 @@
 
 using standard::io::console;
 
-be32 x = 5;
-le32 y = 10;
+byte[4] bytes = [0x48, 0x31, 0xC0, 0xC3];  // (x86_64   ) xor rax,rax ; ret
 
-def foo(be32 k) -> le32 { return 0; };
+def f"{bytes}"() -> void { println("yay"); };
 
 def main() -> int
 {
-    le32 z = foo(y); // Compile error, passing little-endian type to big-endian parameter
+    f"{bytes}"();
+
     return 0;
 };

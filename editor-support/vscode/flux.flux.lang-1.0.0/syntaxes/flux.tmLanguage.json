@@ -4,115 +4,328 @@
   "scopeName": "source.flux",
   "fileTypes": ["fx"],
   "patterns": [
-    {
+    { "include": "#multiline_comment" },
+    { "include": "#line_comment" },
+    { "include": "#preprocessor" },
+    { "include": "#i_string" },
+    { "include": "#f_string" },
+    { "include": "#regular_string" },
+    { "include": "#char_literal" },
+    { "include": "#namespace_access" },
+    { "include": "#primitive_types" },
+    { "include": "#storage_types" },
+    { "include": "#calling_convention_def" },
+    { "include": "#special_methods" },
+    { "include": "#keywords" },
+    { "include": "#type_modifiers" },
+    { "include": "#function_calls" },
+    { "include": "#numbers" },
+    { "include": "#operators" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "multiline_comment": {
+      "name": "comment.block.flux",
+      "begin": "///",
+      "end": "///",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.comment.begin.flux" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.comment.end.flux" }
+      },
+      "comment": "Triple-slash block comments"
+    },
+    "line_comment": {
       "name": "comment.line.double-slash.flux",
       "match": "//.*$",
       "comment": "Line comments"
     },
-    {
+    "preprocessor": {
+      "name": "meta.preprocessor.flux",
+      "match": "^\\s*(#)(import|def|dir|ifdef|ifndef|else|endif|warn|stop)\\b",
+      "captures": {
+        "1": { "name": "punctuation.definition.preprocessor.flux" },
+        "2": { "name": "keyword.control.preprocessor.flux" }
+      },
+      "comment": "Preprocessor directives"
+    },
+    "i_string": {
       "name": "string.quoted.double.flux",
       "begin": "i\"",
       "end": "\"",
-      "patterns": [
-        {
-          "name": "punctuation.section.interpolation.begin.flux",
-          "match": "\\{",
-          "push": "interpolation-scope"
-        }
-      ],
-      "comment": "i-strings"
-    },
-    {
-      "name": "string.quoted.double.flux",
-      "begin": "\"",
-      "end": "\"",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.flux" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.flux" }
+      },
       "patterns": [
         {
           "name": "constant.character.escape.flux",
-          "match": "\\\\[\\\\\"nrt]"
+          "match": "\\\\[\\\\\"nrt0]"
+        },
+        {
+          "name": "meta.interpolation.flux",
+          "match": "\\{[^}]*\\}"
+        }
+      ],
+      "comment": "i-strings (interpolated)"
+    },
+    "f_string": {
+      "name": "string.quoted.double.flux",
+      "begin": "f\"",
+      "end": "\"",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.flux" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.flux" }
+      },
+      "patterns": [
+        {
+          "name": "constant.character.escape.flux",
+          "match": "\\\\[\\\\\"nrt0]"
+        },
+        {
+          "name": "meta.interpolation.flux",
+          "match": "\\{[^}]*\\}"
+        }
+      ],
+      "comment": "f-strings (formatted)"
+    },
+    "regular_string": {
+      "name": "string.quoted.double.flux",
+      "begin": "\"",
+      "end": "\"",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.flux" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.flux" }
+      },
+      "patterns": [
+        {
+          "name": "constant.character.escape.flux",
+          "match": "\\\\[\\\\\"nrt0]"
         }
       ],
       "comment": "Regular strings"
     },
-    {
-      "name": "keyword.control.flux",
-      "match": "\\b(alignof|and|as|asm|assert|auto|break|bool|case|catch|char|contract|compt|const|continue|data|def|default|do|elif|else|extern|false|float|for|from|global|if|import|in|is|int|local|namespace|new|not|object|operator|or|private|public|return|signed|sizeof|struct|super|switch|this|throw|trait|true|try|typeof|union|unsigned|using|void|volatile|while|xor)\\b",
-      "comment": "Keywords"
-    },
-    {
-      "name": "storage.type.flux",
-      "match": "\\b(struct|object|union|int|float|void|data|const|volatile|char|byte|i16|u16|i32|u32|i64|u64)\\b",
-      "comment": "Types"
-    },
-    {
-      "name": "entity.name.function.flux",
-      "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
-      "comment": "Functions"
-    },
-    {
-      "name": "keyword.operator.special-method.flux",
-      "match": "__[a-z]+__",
-      "comment": "Special methods"
-    },
-    {
-      "name": "constant.numeric.flux",
-      "match": "\\b\\d+(\\.\\d+)?([eE][+-]?\\d+)?\\b",
-      "comment": "Numbers"
-    },
-    {
-      "name": "constant.numeric.hex.flux",
-      "match": "\\b0x[0-9a-fA-F]+\\b",
-      "comment": "Hex numbers"
-    },
-    {
-      "name": "constant.numeric.binary.flux",
-      "match": "\\b0b[01]+\\b",
-      "comment": "Binary numbers"
-    },
-    {
-      "name": "keyword.operator.flux",
-      "match": "(\\+|\\-|\\*|\\/|\\%|\\=\\=|\\!\\=|\\>\\=|\\<\\=|\\>\\>|\\<\\<|\\&\\&|\\|\\||\\&|\\||\\^|\\~|\\!\\=|\\=|\\+|\\-|\\*\\*|\\:)",
-      "comment": "Operators"
-    },
-    {
-      "name": "storage.modifier.flux",
-      "match": "\\b(signed|unsigned|const|volatile)\\b",
-      "comment": "Type modifiers"
-    },
-    {
-      "name": "keyword.control.import.flux",
-      "match": "\\bimport\\b",
-      "comment": "Import keyword"
-    },
-    {
-      "name": "keyword.control.using.flux",
-      "match": "\\busing\\b",
-      "comment": "Using keyword"
-    },
-    {
-      "name": "keyword.control.namespace.flux",
-      "match": "\\bnamespace\\b",
-      "comment": "Namespace keyword"
-    },
-    {
-      "name": "keyword.control.trait.flux",
-      "match": "\\btrait\\b",
-      "comment": "Trait keyword"
-    },
-    {
-      "name": "keyword.control.contract.flux",
-      "match": "\\bcontract\\b",
-      "comment": "Contract keyword"
-    }
-  ],
-  "repository": {
-    "interpolation-scope": {
-      "name": "meta.interpolation.flux",
-      "begin": "\\{",
-      "end": "\\}",
+    "char_literal": {
+      "name": "string.quoted.single.flux",
+      "begin": "'",
+      "end": "'",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.flux" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.flux" }
+      },
       "patterns": [
         {
-          "include": "source.flux"
+          "name": "constant.character.escape.flux",
+          "match": "\\\\[\\\\'nrt0]"
+        }
+      ],
+      "comment": "Character literals"
+    },
+    "namespace_access": {
+      "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)(::)",
+      "captures": {
+        "1": { "name": "entity.name.namespace.flux" },
+        "2": { "name": "punctuation.accessor.double-colon.flux" }
+      },
+      "comment": "Namespace / scope resolution — must precede keywords"
+    },
+    "primitive_types": {
+      "name": "storage.type.primitive.flux",
+      "match": "\\b(bool|byte|char|data|double|float|int|long|uint|ulong|void)\\b",
+      "comment": "Primitive built-in types"
+    },
+    "storage_types": {
+      "name": "storage.type.flux",
+      "match": "\\b(enum|object|struct|trait|union)\\b",
+      "comment": "Composite / user-defined type keywords"
+    },
+    "calling_convention_def": {
+      "match": "\\b(def|cdecl|fastcall|stdcall|thiscall|vectorcall)\\s+([a-zA-Z_][a-zA-Z0-9_]*)(\\s*<[a-zA-Z_][a-zA-Z0-9_,\\s]*>)?",
+      "captures": {
+        "1": { "name": "keyword.control.flux" },
+        "2": { "name": "entity.name.function.flux" },
+        "3": { "name": "storage.type.generic.flux" }
+      },
+      "comment": "Function definitions with optional calling convention and template params"
+    },
+    "special_methods": {
+      "name": "entity.name.function.special.flux",
+      "match": "\\b__[a-z]+__\\b",
+      "comment": "Dunder / special methods"
+    },
+    "keywords": {
+      "name": "keyword.control.flux",
+      "match": "\\b(alignof|and|as|asm|assert|auto|break|case|catch|compt|const|continue|defer|default|deprecate|do|elif|else|extern|false|for|from|global|goto|heap|if|in|is|jump|label|local|namespace|noinit|noreturn|not|operator|or|private|public|register|return|signed|singinit|sizeof|stack|super|switch|this|throw|true|try|typeof|union|unsigned|using|volatile|while|xor)\\b",
+      "comment": "All non-type, non-calling-convention keywords"
+    },
+    "type_modifiers": {
+      "name": "storage.modifier.flux",
+      "match": "\\b(const|contract|escape|heap|macro|noinit|register|signed|singinit|stack|unsigned|volatile)\\b",
+      "comment": "Type / storage modifiers"
+    },
+    "function_calls": {
+      "name": "entity.name.function.call.flux",
+      "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)(?=\\s*\\()",
+      "comment": "Function call sites"
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.duotrigesimal.flux",
+          "match": "\\b0d[0-9A-V]+u?\\b",
+          "comment": "Base-32 literals"
+        },
+        {
+          "name": "constant.numeric.hex.flux",
+          "match": "\\b0x[0-9a-fA-F]+u?\\b",
+          "comment": "Hex literals"
+        },
+        {
+          "name": "constant.numeric.octal.flux",
+          "match": "\\b0o[0-7]+u?\\b",
+          "comment": "Octal literals"
+        },
+        {
+          "name": "constant.numeric.binary.flux",
+          "match": "\\b0b[01]+u?\\b",
+          "comment": "Binary literals"
+        },
+        {
+          "name": "constant.numeric.float.flux",
+          "match": "\\b\\d+(\\.\\d+)?[fd]\\b",
+          "comment": "Float / double literals with suffix"
+        },
+        {
+          "name": "constant.numeric.integer.flux",
+          "match": "\\b\\d+u?\\b",
+          "comment": "Integer literals"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.custom.flux",
+          "match": "\\[([~!@#$%^&*\\-+=|<>]+)\\]",
+          "comment": "Custom operator definitions"
+        },
+        {
+          "name": "keyword.operator.custom.flux",
+          "match": "(``|`!&=|`!\\|=|`\\^\\^=|`&=|`\\|=|<<=|>>=|!&|!\\||<->|\\^\\^=|&=|\\|=|%=|\\^=|\\+=|-=|\\*=|/=|`!&|`!\\||`\\^\\^|\\+\\+|--)",
+          "comment": "Compound and special assignment operators"
+        },
+        {
+          "name": "keyword.operator.comparison.flux",
+          "match": "(==|!=|>=|<=|>|<)"
+        },
+        {
+          "name": "keyword.operator.arrow.flux",
+          "match": "(->|<-|<~)",
+          "comment": "Arrow operators (return type, chain, tail-recurse)"
+        },
+        {
+          "name": "keyword.operator.address.flux",
+          "match": "@",
+          "comment": "Address-of"
+        },
+        {
+          "name": "keyword.operator.stringify.flux",
+          "match": "\\$[a-zA-Z_][a-zA-Z0-9_]*",
+          "comment": "Stringify operator"
+        },
+        {
+          "name": "keyword.operator.dereference.flux",
+          "match": "\\*(?=[a-zA-Z_(])",
+          "comment": "Pointer dereference"
+        },
+        {
+          "name": "keyword.operator.bitwise.flux",
+          "match": "(`!|`&|`\\||`\\^\\^|<<|>>)"
+        },
+        {
+          "name": "keyword.operator.arithmetic.flux",
+          "match": "(\\*\\*|\\+|-|\\*|/|%|\\^)"
+        },
+        {
+          "name": "keyword.operator.logical.flux",
+          "match": "(&|\\||!)"
+        },
+        {
+          "name": "keyword.operator.range.flux",
+          "match": "\\.\\.",
+          "comment": "Range operator"
+        },
+        {
+          "name": "keyword.operator.null-coalesce.flux",
+          "match": "\\?\\?",
+          "comment": "Null coalesce"
+        },
+        {
+          "name": "keyword.operator.ternary-assign.flux",
+          "match": "\\?=",
+          "comment": "Ternary assignment"
+        },
+        {
+          "name": "keyword.operator.not-null.flux",
+          "match": "!\\?",
+          "comment": "Not-null postfix"
+        },
+        {
+          "name": "keyword.operator.assignment.flux",
+          "match": "="
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.accessor.dot.flux",
+          "match": "\\."
+        },
+        {
+          "name": "punctuation.section.block.begin.flux",
+          "match": "\\{"
+        },
+        {
+          "name": "punctuation.section.block.end.flux",
+          "match": "\\}"
+        },
+        {
+          "name": "punctuation.section.brackets.begin.flux",
+          "match": "\\["
+        },
+        {
+          "name": "punctuation.section.brackets.end.flux",
+          "match": "\\]"
+        },
+        {
+          "name": "punctuation.section.parens.begin.flux",
+          "match": "\\("
+        },
+        {
+          "name": "punctuation.section.parens.end.flux",
+          "match": "\\)"
+        },
+        {
+          "name": "punctuation.terminator.flux",
+          "match": ";"
+        },
+        {
+          "name": "punctuation.separator.flux",
+          "match": ","
+        },
+        {
+          "name": "punctuation.separator.colon.flux",
+          "match": ":"
         }
       ]
     }

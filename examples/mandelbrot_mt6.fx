@@ -1,8 +1,9 @@
-#import "standard.fx", "math.fx", "windows.fx", "opengl.fx", "threading.fx", "decimal.fx";
+#import "standard.fx", "math.fx", "vectors.fx", "windows.fx", "opengl.fx", "threading.fx", "decimal.fx";
 
 using standard::io::console,
       standard::system::windows,
       standard::math,
+      standard::vectors,
       standard::atomic,
       standard::threading,
       math::decimal;

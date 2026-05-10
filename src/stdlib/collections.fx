@@ -79,6 +79,11 @@ namespace standard
                 return;
             };
 
+            def __expr() -> Array*
+            {
+                return this;
+            };
+
             // ----------------------------------------------------------------
             // Internal: grow capacity by 2x. Returns false on alloc failure.
             // ----------------------------------------------------------------
@@ -412,12 +417,19 @@ namespace standard
                 stdheap::ffree((u64)this.buckets);
             };
 
+            def __expr() -> HashMap*
+            {
+                return this;
+            };
+
             // Internal: insert without copying key (used during resize)
             def _insert_nocopy(u64 hash, byte* key, void* value) -> void
             {
                 u64 mask = this.cap - 1;
                 u64 idx  = hash & mask,
                     psl;
+                HMBucket* slot;
+                HMBucket  tmp;
 
                 HMBucket insert_bkt;
                 insert_bkt.key_hash = hash;
@@ -427,7 +439,7 @@ namespace standard
 
                 while (true)
                 {
-                    HMBucket* slot = this.buckets + idx;
+                    slot = this.buckets + idx;
 
                     // Empty slot: place here
                     if (slot.key_hash == 0)
@@ -454,7 +466,6 @@ namespace standard
                     if (slot.psl < insert_bkt.psl)
                     {
                         // Swap insert_bkt with slot
-                        HMBucket tmp;
                         tmp.key_hash       = slot.key_hash;
                         tmp.key            = slot.key;
                         tmp.value          = slot.value;
@@ -529,8 +540,8 @@ namespace standard
                 u64 mask = this.cap - 1;
                 u64 idx  = hash & mask,
                     psl;
-
-                HMBucket insert_bkt;
+                HMBucket* slot;
+                HMBucket insert_bkt, tmp;
                 insert_bkt.key_hash = hash;
                 insert_bkt.key      = hm_str_dup(key);
                 insert_bkt.value    = value;
@@ -538,7 +549,7 @@ namespace standard
 
                 while (true)
                 {
-                    HMBucket* slot = this.buckets + idx;
+                    slot = this.buckets + idx;
 
                     // Empty slot
                     if (slot.key_hash == 0)
@@ -565,7 +576,6 @@ namespace standard
                     // Robin hood swap
                     if (slot.psl < insert_bkt.psl)
                     {
-                        HMBucket tmp;
                         tmp.key_hash       = slot.key_hash;
                         tmp.key            = slot.key;
                         tmp.value          = slot.value;
@@ -594,10 +604,11 @@ namespace standard
                     mask = this.cap - 1,
                     idx  = hash & mask,
                     psl;
+                HMBucket slot;
 
                 while (true)
                 {
-                    HMBucket* slot = this.buckets + idx;
+                    slot = this.buckets + idx;
 
                     if (slot.key_hash == 0)
                     {
@@ -634,13 +645,15 @@ namespace standard
             def hm_remove(byte* key) -> bool
             {
                 u64 hash = hm_hash_str(key),
-                    mask = this.cap - 1;
-                u64 idx  = hash & mask,
-                    psl;
+                    mask = this.cap - 1,
+                    idx  = hash & mask,
+                    psl,
+                    cur, next;
+                HMBucket* slot, nx, cr;
 
                 while (true)
                 {
-                    HMBucket* slot = this.buckets + idx;
+                    slot = this.buckets + idx;
 
                     if (slot.key_hash == 0)
                     {
@@ -665,16 +678,16 @@ namespace standard
                             this.count    = this.count - 1;
 
                             // Backward shift deletion to maintain robin hood invariant
-                            u64 cur  = idx;
-                            u64 next = (idx + 1) & mask;
+                            cur  = idx;
+                            next = (idx + 1) & mask;
                             while (true)
                             {
-                                HMBucket* nx = this.buckets + next;
+                                nx = this.buckets + next;
                                 if (nx.key_hash == 0 | nx.psl == 0)
                                 {
                                     break;
                                 };
-                                HMBucket* cr = this.buckets + cur;
+                                cr = this.buckets + cur;
                                 cr.key_hash = nx.key_hash;
                                 cr.key      = nx.key;
                                 cr.value    = nx.value;
@@ -757,6 +770,11 @@ namespace standard
             def __exit() -> void
             {
                 stdheap::ffree((u64)this.buckets);
+            };
+
+            def __expr() -> HashMapInt*
+            {
+                return this;
             };
 
             def _insert_raw(u64 hash, u64 key, void* value) -> void
@@ -865,13 +883,14 @@ namespace standard
             def hmi_get(u64 key) -> void*
             {
                 u64 hash = hm_hash_u64(key),
-                    mask = this.cap - 1;
-                u64 idx  = hash & mask,
-                    psl  = 0;
+                    mask = this.cap - 1,
+                    idx  = hash & mask,
+                    psl;
+                HMIBucket slot;
 
                 while (true)
                 {
-                    HMIBucket* slot = this.buckets + idx;
+                    slot = this.buckets + idx;
 
                     if (slot.key_hash == 0)
                     {
@@ -902,9 +921,9 @@ namespace standard
             def hmi_remove(u64 key) -> bool
             {
                 u64 hash = hm_hash_u64(key),
-                    mask = this.cap - (u64)1;
-                u64 idx  = hash & mask,
-                    psl  = 0,
+                    mask = this.cap - (u64)1,
+                    idx  = hash & mask,
+                    psl,
                     cur, next;
 
                 HMIBucket* slot, nx, cr;
@@ -1070,6 +1089,11 @@ namespace standard
                 this.tail     = (LLNode*)STDLIB_GVP;
                 this.len      = 0;
                 return;
+            };
+
+            def __expr() -> LinkedList*
+            {
+                return this;
             };
 
             // ----------------------------------------------------------------
@@ -1313,6 +1337,11 @@ namespace standard
                 return;
             };
 
+            def __expr() -> Stack*
+            {
+                return this;
+            };
+
             def stack_push(void* value) -> bool
             {
                 LLNode* n = this.ll.push_back(value);
@@ -1382,6 +1411,11 @@ namespace standard
             {
                 this.ll.__exit();
                 return;
+            };
+
+            def __expr() -> Queue*
+            {
+                return this;
             };
 
             def enqueue(void* value) -> bool
@@ -1475,6 +1509,11 @@ namespace standard
                     this.buf = (void**)STDLIB_GVP;
                 };
                 return;
+            };
+
+            def __expr() -> Deque*
+            {
+                return this;
             };
 
             def dq_push_back(void* value) -> bool
@@ -1627,6 +1666,11 @@ namespace standard
                     this.buf = (byte*)STDLIB_GVP;
                 };
                 return;
+            };
+
+            def __expr() -> RingBuffer*
+            {
+                return this;
             };
 
             def rb_write(byte* src, size_t n) -> size_t
@@ -1802,6 +1846,11 @@ namespace standard
                 this.buckets  = (HSBucket*)STDLIB_GVP;
                 this.key_pool = (byte*)STDLIB_GVP;
                 return;
+            };
+
+            def __expr() -> HashSet*
+            {
+                return this;
             };
 
             // Internal: carve a copy of key from the pool (bump alloc, no malloc).
@@ -2093,6 +2142,11 @@ namespace standard
                 return;
             };
 
+            def __expr() -> HashSetInt*
+            {
+                return this;
+            };
+
             // No alloc/free in this function.
             def _hsib_probe(u64 hash, u64 key) -> void
             {
@@ -2324,6 +2378,11 @@ namespace standard
             {
                 this.elems.__exit();
                 return;
+            };
+
+            def __expr() -> MinHeap*
+            {
+                return this;
             };
 
             // ----------------------------------------------------------------

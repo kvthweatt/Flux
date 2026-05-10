@@ -20,8 +20,8 @@ def write_jmp_indirect(ulong dst) -> void
 // Write an 8-byte absolute address at `dst` in little-endian order.
 def write_addr64(ulong dst, ulong addr) -> void
 {
-    byte* p = (byte*)dst,
-          a = (byte*)@addr;
+    byte* p = (@)dst,
+          a = (@)addr;
     for (int i = 0; i < 8; i++)
     {
         p[i] = a[i];
@@ -31,8 +31,8 @@ def write_addr64(ulong dst, ulong addr) -> void
 // Copy `n` bytes from `src` to `dst`.
 def copy_bytes(ulong dst, ulong src, int n) -> void
 {
-    byte* d = (byte*)dst,
-          s = (byte*)src;
+    byte* d = (@)dst,
+          s = (@)src;
     for (int i = 0; i < n; i++)
     {
         d[i] = s[i];
