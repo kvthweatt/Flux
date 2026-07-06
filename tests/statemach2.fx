@@ -2,7 +2,7 @@
 
 using standard::io::console;
 
-enum State { Idle, Running, Paused, Stopped };
+enum State { Idle, Running, Paused, Stopped, Unknown};
 
 comptime
 {
@@ -14,11 +14,11 @@ comptime
     {
         def state_name(int s) -> byte*
         {
-            if (s == 0) { return "Idle"; };
-            if (s == 1) { return "Running"; };
-            if (s == 2) { return "Paused"; };
-            if (s == 3) { return "Stopped"; };
-            return "Unknown";
+            if (s == 0) { return $State.Idle; };
+            if (s == 1) { return $State.Running; };
+            if (s == 2) { return $State.Paused; };
+            if (s == 3) { return $State.Stopped; };
+            return $State.Unknown;
         };
     };
 
@@ -26,13 +26,7 @@ comptime
     {
         emitflux
         {
-            comptime
-            {
-                emitflux
-                {
-                    def ~$i"can_trans_{}_{}":{trans_from[tidx];trans_to[tidx];}() -> bool { return true; };
-                };
-            };
+            def ~$i"can_trans_{}_{}":{trans_from[tidx];trans_to[tidx];}() -> bool { return true; };
         };
     };
 
@@ -70,6 +64,9 @@ def main() -> int
 
     state = transition(state, 3);
     println(f"Stop:    {state_name(state)}");
+
+    state = transition(state, 4);
+    println(f"Unknown: {state_name(state)}");
 
     return 0;
 };

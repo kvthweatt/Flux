@@ -9,6 +9,8 @@ comptime
             field_names = ["x", "y", "z", "w"];
     int     field_count = 4;
 
+    compiler.io.console.print("test?");
+
     // Emit the struct itself
     emitflux
     {

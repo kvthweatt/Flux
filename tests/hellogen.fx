@@ -24,6 +24,8 @@ comptime
                     };
                 };
             };
+
+            ~$f"gen_layer_{i}({i});";
         };
     };
 };

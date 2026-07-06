@@ -169,7 +169,7 @@ def !!atexit(void* fn) -> int
 
 
 #ifdef FLUX_SHADOW_STACK
-#import "shadowstack.fx";
+#import <shadowstack.fx>;
 #endif;
 
 

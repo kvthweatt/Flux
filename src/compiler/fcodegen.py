@@ -1384,6 +1384,13 @@ class CodegenVisitor:
                                 isinstance(pt, ir.PointerType) and
                                 rt.pointee.element == pt.pointee):
                             continue
+                        # __expr auto-promotion: object pointer from __expr matches
+                        # an overload param that takes the struct value by value.
+                        if (getattr(raw, '_from_expr_method', False) and
+                                isinstance(rt, ir.PointerType) and
+                                isinstance(rt.pointee, ir.IdentifiedStructType) and
+                                rt.pointee == pt):
+                            continue
                         types_match = False
                         break
                     if types_match:
@@ -1397,6 +1404,11 @@ class CodegenVisitor:
                                 not isinstance(rt.pointee, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType)) and
                                 rt.pointee == pt):
                             av = builder.load(av, name=f"op_deref_{i}")
+                        elif (getattr(av, '_from_expr_method', False) and
+                                isinstance(rt, ir.PointerType) and
+                                isinstance(rt.pointee, ir.IdentifiedStructType) and
+                                rt.pointee == pt):
+                            av = builder.load(av, name=f"op_expr_deref_{i}")
                         else:
                             av = FunctionTypeHandler.convert_argument_to_parameter_type(
                                 builder, module, av, pt, i, node)

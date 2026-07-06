@@ -26,7 +26,7 @@ from fast import (
     FunctionCall, MethodCall, MemberAccess,
     ArrayLiteral,
     AddressOf, CastExpression, TypeConvertExpression,
-    PointerDeref,
+    PointerDeref, BitSlice,
     InExpression,
     HasExpression,
     SizeOf,
@@ -35,7 +35,7 @@ from fast import (
     EndianOf,
     IfStatement,
     WhileLoop, DoLoop, DoWhileLoop,
-    ForLoop,
+    ForLoop, ForInLoop,
     ReturnStatement,
     BreakStatement, ContinueStatement, EscapeStatement,
     DeferStatement,
@@ -832,6 +832,7 @@ class FVMCodegen:
         elif t is ExpressionStatement:   self._visit_expr_stmt(node)
         elif t is IfStatement:           self._visit_if(node)
         elif t is ForLoop:               self._visit_for(node)
+        elif t is ForInLoop:             self._visit_for_in(node)
         elif t is WhileLoop:             self._visit_while(node)
         elif t is DoLoop:                self._visit_do(node)
         elif t is DoWhileLoop:           self._visit_do_while(node)
@@ -1364,6 +1365,7 @@ class FVMCodegen:
         elif t is TypeConvertExpression: return self._visit_cast(node)
         elif t is InlineAsm:           return self._visit_inline_asm(node)
         elif t is TernaryOp:           return self._visit_ternary_op(node)
+        elif t is BitSlice:            return self._visit_bitslice(node)
         else:
             raise FVMCodegenError(
                 f'fvmcodegen: unsupported expression in comptime: {type(node).__name__}',
@@ -2523,6 +2525,15 @@ class FVMCodegen:
         self._emit(_instr(Op.ARRAY_LOAD))
         return True
 
+    def _visit_bitslice(self, node: BitSlice) -> bool:
+        # Push value, start, end then emit BITSLICE.
+        # The VM op pops end, start, value and pushes Val(TTag.DATA, result, {'bits': n}).
+        self._visit_expr(node.value)
+        self._visit_expr(node.start)
+        self._visit_expr(node.end)
+        self._emit(_instr(Op.BITSLICE))
+        return True
+
     # ------------------------------------------------------------------
     # Control flow
     # ------------------------------------------------------------------
@@ -3302,6 +3313,180 @@ class FVMCodegen:
             self._patch_at(idx, Op.JMP, update_ip)
         for idx in break_patches:
             self._patch_at(idx, Op.JMP, after_loop)
+
+    def _visit_for_in(self, node: ForInLoop):
+        """
+        Compile a for-in loop at comptime, mirroring fcodegen.py's visit_ForInLoop.
+
+        The iterable is evaluated first to determine its runtime kind:
+          - TTag.BYTES  : null-terminated byte string (byte*). Walk byte by byte
+                          until a zero byte is found. Mirrors fcodegen's i8* branch.
+          - TTag.ARRAY  : VM array value. Walk by index from 0 to len-1.
+                          Mirrors fcodegen's ArrayType branch.
+          - TTag.PTR    : heap pointer. Walk pointer arithmetic until slot value
+                          is zero (null). Mirrors fcodegen's pointer-of-pointer branch.
+
+        The loop variable named node.variables[0] is defined in the local scope
+        for each iteration body execution, mirroring fcodegen's alloca/define.
+
+        Break/continue are handled via the same _break_stack/_continue_stack
+        mechanism used by _visit_for and _visit_while.
+        """
+        var_name = node.variables[0]
+        body_stmts = (
+            node.body.statements if isinstance(node.body, Block) else [node.body]
+        )
+
+        # Evaluate iterable once to a local slot so we can reference it per-iteration
+        # without re-evaluating the expression. Use a hidden slot name.
+        iter_slot_name = f'__forin_iter__{var_name}'
+        iter_slot = self._alloc_local(iter_slot_name)
+        self._visit_expr(node.iterable)
+        self._emit(_instr(Op.DUP))
+        self._emit(_instr(Op.LOCAL_SET, iter_slot))
+
+        # We need to branch based on the runtime kind of the iterable.
+        # At comptime all types are known statically via the typespec, but
+        # rather than duplicate typespec inspection, we mirror fcodegen: the
+        # iterable's TTag determines behavior. We use a type-tag dispatch at
+        # codegen time by inspecting what _visit_expr will have pushed.
+        #
+        # Static dispatch: resolve the iterable's kind from typespec if available.
+        iter_kind = 'bytes'  # default: treat as null-terminated byte string
+        if isinstance(node.iterable, Identifier):
+            _ts = self._local_typespecs.get(node.iterable.name)
+            if _ts is not None:
+                _is_arr = getattr(_ts, 'is_array', False)
+                _is_ptr = getattr(_ts, 'is_pointer', False)
+                if _is_arr:
+                    iter_kind = 'array'
+                elif _is_ptr:
+                    # byte* -> bytes walk; other pointer -> pointer walk
+                    from ftypesys import DataType as _DT
+                    if getattr(_ts, 'base_type', None) == _DT.BYTE:
+                        iter_kind = 'bytes'
+                    else:
+                        iter_kind = 'ptr'
+
+        # Allocate the loop variable slot
+        var_slot = self._alloc_local(var_name)
+
+        self._break_stack.append([])
+        self._continue_stack.append([])
+
+        if iter_kind == 'bytes':
+            # -- null-terminated byte string: walk index 0..N until byte==0 --
+            # idx slot
+            idx_slot_name = f'__forin_idx__{var_name}'
+            idx_slot = self._alloc_local(idx_slot_name)
+            self._emit(_instr(Op.PUSH, Val(TTag.INT, 0)))
+            self._emit(_instr(Op.LOCAL_SET, idx_slot))
+
+            # cond: load iter[idx], if byte == 0 exit
+            loop_cond = self._current_ip()
+            self._emit(_instr(Op.LOCAL_GET, iter_slot))   # push string
+            self._emit(_instr(Op.LOCAL_GET, idx_slot))    # push index
+            self._emit(_instr(Op.ARRAY_LOAD))             # push byte at index
+            self._emit(_instr(Op.DUP))                    # keep for condition check
+            self._emit(_instr(Op.PUSH, Val(TTag.INT, 0)))
+            self._emit(_instr(Op.CMP_EQ))                 # byte == 0?
+            exit_patch = self._emit(_instr(Op.JIF, 0))   # jump out if zero (end of string)
+            # store byte into var slot (already on stack from DUP above)
+            self._emit(_instr(Op.LOCAL_SET, var_slot))
+
+            # body
+            for stmt in body_stmts:
+                if stmt is None:
+                    continue
+                self._visit_stmt(stmt)
+
+            # latch: idx++, jump back to cond
+            latch_ip = self._current_ip()
+            self._emit(_instr(Op.LOCAL_GET, idx_slot))
+            self._emit(_instr(Op.PUSH, Val(TTag.INT, 1)))
+            self._emit(_instr(Op.ADD))
+            self._emit(_instr(Op.LOCAL_SET, idx_slot))
+            self._emit(_instr(Op.JMP, loop_cond))
+
+            after_loop = self._current_ip()
+            self._patch_at(exit_patch, Op.JIF, after_loop)
+
+        elif iter_kind == 'array':
+            # -- VM array: walk index 0 .. ARRAY_LEN-1 --
+            idx_slot_name = f'__forin_idx__{var_name}'
+            idx_slot = self._alloc_local(idx_slot_name)
+            len_slot_name = f'__forin_len__{var_name}'
+            len_slot = self._alloc_local(len_slot_name)
+
+            # Store length once
+            self._emit(_instr(Op.LOCAL_GET, iter_slot))
+            self._emit(_instr(Op.ARRAY_LEN))
+            self._emit(_instr(Op.LOCAL_SET, len_slot))
+
+            self._emit(_instr(Op.PUSH, Val(TTag.INT, 0)))
+            self._emit(_instr(Op.LOCAL_SET, idx_slot))
+
+            loop_cond = self._current_ip()
+            self._emit(_instr(Op.LOCAL_GET, idx_slot))
+            self._emit(_instr(Op.LOCAL_GET, len_slot))
+            self._emit(_instr(Op.CMP_LT))
+            exit_patch = self._emit(_instr(Op.JNF, 0))
+
+            # load element into var slot
+            self._emit(_instr(Op.LOCAL_GET, iter_slot))
+            self._emit(_instr(Op.LOCAL_GET, idx_slot))
+            self._emit(_instr(Op.ARRAY_LOAD))
+            self._emit(_instr(Op.LOCAL_SET, var_slot))
+
+            for stmt in body_stmts:
+                if stmt is None:
+                    continue
+                self._visit_stmt(stmt)
+
+            latch_ip = self._current_ip()
+            self._emit(_instr(Op.LOCAL_GET, idx_slot))
+            self._emit(_instr(Op.PUSH, Val(TTag.INT, 1)))
+            self._emit(_instr(Op.ADD))
+            self._emit(_instr(Op.LOCAL_SET, idx_slot))
+            self._emit(_instr(Op.JMP, loop_cond))
+
+            after_loop = self._current_ip()
+            self._patch_at(exit_patch, Op.JNF, after_loop)
+
+        else:
+            # -- ptr walk: dereference slot until null --
+            # Mirrors fcodegen's pointer-of-pointer branch: walk until *ptr == 0
+            loop_cond = self._current_ip()
+            self._emit(_instr(Op.LOCAL_GET, iter_slot))
+            self._emit(_instr(Op.PUSH, Val(TTag.INT, 0)))
+            self._emit(_instr(Op.CMP_EQ))
+            exit_patch = self._emit(_instr(Op.JIF, 0))
+
+            self._emit(_instr(Op.LOCAL_GET, iter_slot))
+            self._emit(_instr(Op.LOCAL_SET, var_slot))
+
+            for stmt in body_stmts:
+                if stmt is None:
+                    continue
+                self._visit_stmt(stmt)
+
+            latch_ip = self._current_ip()
+            self._emit(_instr(Op.LOCAL_GET, iter_slot))
+            self._emit(_instr(Op.PUSH, Val(TTag.INT, 1)))
+            self._emit(_instr(Op.ADD))
+            self._emit(_instr(Op.LOCAL_SET, iter_slot))
+            self._emit(_instr(Op.JMP, loop_cond))
+
+            after_loop = self._current_ip()
+            self._patch_at(exit_patch, Op.JIF, after_loop)
+
+        # Patch break/continue
+        break_patches = self._break_stack.pop()
+        continue_patches = self._continue_stack.pop()
+        for idx in break_patches:
+            self._patch_at(idx, Op.JMP, after_loop)
+        for idx in continue_patches:
+            self._patch_at(idx, Op.JMP, latch_ip)
 
     def _visit_while(self, node: WhileLoop):
         loop_start = self._current_ip()

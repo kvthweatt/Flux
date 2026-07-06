@@ -1959,6 +1959,9 @@ class FluxParser:
         if self.expect(TokenType.FUNCTION_POINTER):
             self.advance()  # consume the {}* token
             return self.function_pointer_declaration(calling_conv=calling_conv)
+
+        if calling_conv == 'cdecl':
+            no_mangle = True
         
         if self.expect(TokenType.NO_MANGLE):
             no_mangle = True

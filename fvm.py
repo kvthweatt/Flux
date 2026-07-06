@@ -55,6 +55,7 @@ class Op(Enum):
     POPCOUNT    = auto()   # POPCOUNT      - count set bits
     CLZ         = auto()   # CLZ <width>   - count leading zeros within width
     CTZ         = auto()   # CTZ <width>   - count trailing zeros
+    BITSLICE    = auto()   # BITSLICE - pop end, pop start, pop val, push extracted bits
 
     # Comparison
     CMP_EQ      = auto()
@@ -547,6 +548,7 @@ class FluxVM:
         elif op == Op.POPCOUNT:   self._unop(lambda a: bin(a & ((1 << 64) - 1)).count('1'))
         elif op == Op.CLZ:        self._op_clz(o[0])
         elif op == Op.CTZ:        self._op_ctz(o[0])
+        elif op == Op.BITSLICE:   self._op_bitslice()
 
         # Comparison
         elif op == Op.CMP_EQ:     self._cmp(lambda a, b: a == b)
@@ -1046,6 +1048,58 @@ class FluxVM:
             n >>= 1
         self._push(Val(val.tag, result))
 
+    def _op_bitslice(self):
+        # Stack order pushed by codegen: value, start, end (end on top)
+        end_val   = self._pop()
+        start_val = self._pop()
+        arr_val   = self._pop()
+        start = int(start_val.data)
+        end   = int(end_val.data)
+        num_bits = end - start + 1
+
+        # Build a flat byte list from the source value, MSB-first (matching fcodegen).
+        raw_bytes = []
+        if arr_val.tag == TTag.ARRAY:
+            elements = (arr_val.meta or {}).get('elements', [])
+            for el in elements:
+                raw_bytes.append(int(el.data) & 0xFF)
+        elif arr_val.tag == TTag.BYTES and isinstance(arr_val.data, (bytes, bytearray)):
+            raw_bytes = list(arr_val.data)
+        elif arr_val.tag in (TTag.BYTE, TTag.INT, TTag.UINT, TTag.LONG, TTag.ULONG, TTag.DATA):
+            # Integer: pack big-endian so bit 0 = MSB
+            v = int(arr_val.data)
+            bits_meta = (arr_val.meta or {}).get('bits')
+            if bits_meta is not None:
+                nbytes = (bits_meta + 7) // 8
+            elif arr_val.tag == TTag.BYTE:
+                nbytes = 1
+            elif arr_val.tag in (TTag.INT, TTag.UINT):
+                nbytes = 4
+            elif arr_val.tag in (TTag.LONG, TTag.ULONG):
+                nbytes = 8
+            else:
+                nbytes = (v.bit_length() + 7) // 8 or 1
+            for i in range(nbytes):
+                shift = (nbytes - 1 - i) * 8
+                raw_bytes.append((v >> shift) & 0xFF)
+        else:
+            raise VMError(f'BITSLICE: unsupported value tag {arr_val.tag}')
+
+        # Extract bits [start..end] from MSB-first flat byte layout.
+        result = 0
+        for bit_pos in range(start, end + 1):
+            byte_idx   = bit_pos // 8
+            bit_in_byte = bit_pos % 8
+            if byte_idx < len(raw_bytes):
+                # MSB of byte is bit 0 within that byte
+                byte_val = raw_bytes[byte_idx]
+                bit = (byte_val >> (7 - bit_in_byte)) & 1
+            else:
+                bit = 0
+            result = (result << 1) | bit
+
+        self._push(Val(TTag.DATA, result, {'bits': num_bits}))
+
     def _op_clz(self, width: int):
         val = self._pop()
         n   = int(val.data) & ((1 << width) - 1)
@@ -1305,6 +1359,14 @@ class FluxVM:
                 raw = self.heap.read(addr + idx, 1)
                 self._push(Val(TTag.BYTE, raw[0]))
                 return
+        # BYTES (byte* string literal): index directly into the Python bytes object
+        if av.tag == TTag.BYTES and isinstance(av.data, (bytes, bytearray)):
+            raw = av.data
+            if idx < 0 or idx >= len(raw):
+                self._push(Val(TTag.BYTE, 0))
+                return
+            self._push(Val(TTag.BYTE, raw[idx]))
+            return
         elements = (av.meta or {}).get('elements')
         if elements is None:
             raise VMError('ARRAY_LOAD: array has no elements storage')
@@ -1819,7 +1881,9 @@ class FluxVM:
 
     def _op_compiler_print(self):
         val = self._pop()
-        if val.tag in (TTag.BYTES, TTag.PTR, TTag.CHAR) or isinstance(val.data, (str, bytes, bytearray)):
+        if val.tag == TTag.BYTE:
+            text = chr(int(val.data) & 0xFF)
+        elif val.tag in (TTag.BYTES, TTag.PTR, TTag.CHAR) or isinstance(val.data, (str, bytes, bytearray)):
             text = self._read_vm_string(val)
         else:
             text = str(val.data)
@@ -2685,6 +2749,7 @@ def _serialise_instr(instr) -> str:
         Op.ALLOC, Op.FREE, Op.OFFSET,
         Op.ARRAY_LEN, Op.ARRAY_LOAD, Op.ARRAY_STORE,
         Op.ENUM_LOAD, Op.ENUM_STORE,
+        Op.BITSLICE,
         Op.TYPEOF,
         Op.IO_OPEN, Op.IO_READ, Op.IO_WRITE, Op.IO_CLOSE,
         Op.FFI_FREE,
@@ -3176,6 +3241,7 @@ def _parse_operands(op: Op, raw_tokens: List[str], lineno: int) -> list:
         Op.ALLOC, Op.FREE, Op.OFFSET,
         Op.ARRAY_LEN, Op.ARRAY_LOAD, Op.ARRAY_STORE,
         Op.ENUM_LOAD, Op.ENUM_STORE,
+        Op.BITSLICE,
         Op.TYPEOF,
         Op.IO_OPEN, Op.IO_READ, Op.IO_WRITE, Op.IO_CLOSE,
         Op.FFI_FREE,

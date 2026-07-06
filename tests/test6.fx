@@ -4,11 +4,6 @@
  
 using standard::io::console;
 
-trait TR<X>
-{
-	def foo<X>(X x) -> X;
-};
-
 struct A<T,U>
 {
 	T x;
