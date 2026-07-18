@@ -400,11 +400,11 @@ The syntax and grammar are stable and will not change. The compiler works. Real 
 - Style Guide, Keyword Reference
 - Windows, Linux, and macOS setup guides
 - C->Flux translation utility
+- [Official IDE of flux](https://github.com/Hemansh2633B/ZED-fluxc)
 
 **In progress:**
 - Standard library expansion
 - Build tooling
-- IDE
 
 ---
 
