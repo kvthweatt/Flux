@@ -1,7 +1,5 @@
 # Flux Programming Language - AGENTS.md
 
-**Target Audience:** Autonomous AI coding agents (Claude Code, Codex CLI, Gemini CLI, Cursor, Aider, OpenHands, Roo Code, Continue, Warp AI, GitHub Copilot, etc.)
-
 ---
 
 # Project Overview
