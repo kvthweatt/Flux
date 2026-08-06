@@ -425,7 +425,7 @@ The syntax and grammar are stable and will not change. The compiler works. Real 
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=kvthweatt/FluxLang&type=date&legend=top-left)](https://www.star-history.com/#kvthweatt/FluxLang&type=date&legend=top-left)
+[![Star History Chart](https://star-history.dera.page/svg?repos=kvthweatt/Flux&type=date&legend=top-left)](https://star-history.dera.page/#kvthweatt/Flux&type=date&legend=top-left)
 
 ---
 
