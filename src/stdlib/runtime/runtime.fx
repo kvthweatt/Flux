@@ -24,6 +24,66 @@ const void* STDLIB_GVP = (void*)@void;
 const data{64} U64MAXVAL = 0xFFFFFFFFFFFFFFFFu;
 const bool _fltused = true;
 
+struct FXC_TYPESYS
+{
+    byte*  base_type,       // "int", "byte", "float", "struct", etc. — DataType as string
+           custom_typename; // named type e.g. "MyStruct", empty string if primitive
+    bool   is_signed,
+           is_const,
+           is_volatile,
+           is_tied,
+           is_pointer;
+    int    pointer_depth;
+    bool   is_array,
+           array_size,      // 0 if not array or dynamic
+           bit_width,       // 0 if not explicitly set
+           alignment,       // 0 if not explicitly set
+           endianness;      // 1 = big, 0 = little
+    byte*  storage_class;   // "stack", "heap", "global", "local", "register", "singinit", or ""
+    bool   is_dict;
+    byte*  dict_key_type,   // typeof key as string, empty if not dict
+           dict_value_type; // typeof value as string, empty if not dict
+};
+
+struct FXC_PARAM
+{
+    byte*      name;
+    FXC_TYPESYS type;
+};
+
+struct FXC_FUNCINFO
+{
+    int        param_count;
+    FXC_PARAM* params;
+    FXC_TYPESYS return_type;
+    byte*      calling_conv;   // "fastcall", "cdecl", etc. -- empty = default
+    bool       is_variadic,
+               is_recursive,
+               is_inline,
+               no_mangle,
+               has_effect,     // true if # effect {} annotation present
+               has_attenuate;  // true if # attenuate {} annotation present
+    int        pre_contracts,  // count of pre-contracts
+               post_contracts; // count of post-contracts
+};
+
+struct FXC_SYMENTRY
+{
+    byte* name,        // unmangled name
+          kind;        // "function", "struct", "object", "trait", "interface",
+                       // "namespace", "variable", "enum", "union",
+                       // "effect", "constraint", "contract"
+    FXC_TYPESYS* type; // underlying type for everything,
+                       // empty string for kinds that have no single type (struct, trait, etc.)
+    byte* ns;          // fully qualified namespace path, empty string if top-level
+};
+
+struct FXC_SYMTABLE
+{
+    int entries;
+    FXC_SYMENTRY* entry;
+};
+
 //def !!__chkstk() -> void {};
 
 #ifdef __ARCH_X86_64__

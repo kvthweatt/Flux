@@ -4465,7 +4465,7 @@ system proves, which feeds optimizer signals like `Pure` and `!Alloc`.
 ```
 and, as, asm, assert, auto, bool, break, byte, case, catch,
 cdecl, char, comptime, const, constraint, continue, contract, data, def, default, defer,
-deprecate, dict, do, double, effect, elif, else, emitflux, enum, escape, export, extern,
+deprecate, dict, do, double, effect, elif, else, emitflux, enum, error, escape, export, extern,
 false, fastcall, float, for, from, global, goto, has, heap, if, in, inline, int, interface, is,  
 jump, label, local, long, macro, namespace, noinit, noreturn, not, object,
 operator, or, private, public, register, return, signed, singinit,

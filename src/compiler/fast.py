@@ -160,7 +160,7 @@ class StringLiteral(Expression):
     storage_class: Optional[StorageClass] = None
 
     def __repr__(self) -> str:
-        return f"\"{self.value.replace('\n','\\n').replace('\0','\\0')}\""
+        return f"\"{self.value.replace(chr(10),'\\n').replace(chr(0),'\\0')}\""
     
 
 
@@ -624,7 +624,7 @@ class Block(Statement):
 
     def __repr__(self) -> str:
         if isinstance(self.statements, list):
-            return f"{'\n\t'.join([str(x) for x in self.statements])}"
+            return f"{'\\n\\t'.join([str(x) for x in self.statements])}"
 
 
 @dataclass
@@ -761,6 +761,7 @@ class ForInLoop(Statement):
     variables: List[str]
     iterable: Expression
     body: Block
+    is_destructure: bool = False
 
 @dataclass
 class ReturnStatement(Statement):
@@ -768,6 +769,25 @@ class ReturnStatement(Statement):
 
     def __repr__(self) -> str:
         return f"return {self.value};"
+
+@dataclass
+class ErrorReturnStatement(Statement):
+    """
+    Error return statement: error <expr>;
+    
+    Returns via the error channel of a dual-return function.
+    The expression is returned as the error value (typed as the function's error_type).
+    
+    Syntax forms:
+        error {"msg"};       // struct literal inferred from error_type context
+        error arg;           // return existing value as error
+        error -> arg;        // alternate arrow form
+        error return arg;    // explicit 'return' keyword form
+    """
+    value: Optional[Expression] = None
+
+    def __repr__(self) -> str:
+        return f"error {self.value};"
 
 @dataclass
 class BreakStatement(Statement):
@@ -940,6 +960,7 @@ class FunctionDef(ASTNode):
     is_deprecated: bool = False
     effect_annotation: Optional['EffectAnnotation'] = None      # # effect { ... }
     attenuate_annotation: Optional['AttenuateAnnotation'] = None # # attenuate { ... }
+    error_type: Optional[TypeSystem] = None  # error channel type: def f() -> int ^| ErrType
 
     # Map Flux calling-convention keywords to LLVM CC strings
     _CALLING_CONV_MAP: ClassVar[dict] = {
@@ -999,6 +1020,25 @@ class DestructuringAssignment(Statement):
     source: Expression
     source_type: Optional[Identifier]  # For the "from" clause
     is_explicit: bool  # True if using "as" syntax
+
+@dataclass
+class DualAssignDeclaration(Statement):
+    """
+    Dual-assignment declaration for dual-return function calls.
+
+    Syntax: success_type ^| error_type success_name, error_name = call();
+
+    Declares two variables from one call: the success value and the error value.
+    Either name may be '_' to discard that channel.
+    """
+    success_type: TypeSystem
+    error_type: TypeSystem
+    success_name: str
+    error_name: str
+    call_expr: Expression
+
+    def __repr__(self) -> str:
+        return f"{self.success_type} ^| {self.error_type} {self.success_name}, {self.error_name} = {self.call_expr};"
 
 @dataclass
 class EnumDef(ASTNode):
@@ -1084,6 +1124,7 @@ class StructLiteral(Expression):
     positional_values: List[Expression] = field(default_factory=list)
     struct_type: Optional[str] = None  # Can be inferred from context
     
+
 
 
 # Struct pointer vtable

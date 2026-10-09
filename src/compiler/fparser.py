@@ -111,6 +111,7 @@ _TOKEN_SYMBOL_MAP = {
     TokenType.RETURN_ARROW:       '->',
     TokenType.SCOPE:              '::',
     TokenType.BACKSLASH:          '\\',
+    TokenType.STRINGIFY:          '$',
 }
 
 _SYMBOL_MANGLE = {
@@ -118,6 +119,7 @@ _SYMBOL_MANGLE = {
     '/': 'div',  '<': 'lt',   '>': 'gt',    '=': 'eq',
     '&': 'amp',  '|': 'pipe', '^': 'xor',   '!': 'not',
     '?': 'qst',  '@': 'at',   '~': 'tilde', '\\': 'bslash',
+    '$': 'dol',
 }
 
 # Tokens that can begin a primary expression.  Used by binary-level parsers to
@@ -469,7 +471,11 @@ class FluxParser:
         self._pending_template_instances = []  # (kind, node) tuples: 'struct' | 'object' | 'function'
         self._parsed_objects = {}  # object_name -> ObjectDef AST node
         self._parsed_traits = {}   # trait_name -> TraitDef AST node
-        self._custom_operators: Dict[str, str] = {}  # symbol string -> base function name
+        self._custom_operators: Dict[str, str] = {}  # symbol string -> base function name (binary)
+        self._custom_prefix_ops: Dict[str, str] = {}   # symbol string -> func_name (prefix unary)
+        self._custom_postfix_ops: Dict[str, str] = {}  # symbol string -> func_name (postfix unary)
+        self._custom_ternary_ops: Dict[tuple, str] = {}   # (left_sym, right_sym) -> func_name (ternary)
+        self._custom_circumfix_ops: Dict[tuple, str] = {} # (left_sym, right_sym) -> func_name (circumfix)
         self._active_template_params: set = set()  # template param names in scope during current def/struct parse
         self._contracts: Dict[str, Block] = {}  # name -> Block of statements to inject
         self._contract_bindings: Dict[str, dict] = {}  # name -> binding spec dict from # binding { ... }
@@ -813,6 +819,41 @@ class FluxParser:
 
         return best_symbol, best_length
 
+    def _match_custom_unary_op(self, op_table: dict):
+        """
+        Greedy longest-match against the given custom unary operator table.
+        Returns (symbol_string, token_count) or (None, 0).
+        """
+        best_symbol = None
+        best_length = 0
+
+        for symbol in op_table:
+            candidate_types = self._symbol_to_token_types(symbol)
+            if candidate_types is None:
+                continue
+            n = len(candidate_types)
+            if n <= best_length:
+                continue
+            tokens_match = True
+            for i in range(n):
+                tok = self.current_token if i == 0 else self.peek(i)
+                if tok is None:
+                    tokens_match = False
+                    break
+                if candidate_types[i] == TokenType.IDENTIFIER:
+                    sym_parts = self._symbol_to_parts(symbol)
+                    if tok.type != TokenType.IDENTIFIER or tok.value != sym_parts[i]:
+                        tokens_match = False
+                        break
+                elif tok.type != candidate_types[i]:
+                    tokens_match = False
+                    break
+            if tokens_match:
+                best_symbol = symbol
+                best_length = n
+
+        return best_symbol, best_length
+
     def operator_def(self) -> FunctionDef:
         """
         operator_def -> 'operator' ('<' template_params '>')? '(' parameter_list ')' '[' op_tokens+ ']' '->' type_spec
@@ -852,24 +893,42 @@ class FluxParser:
         params = self.parameter_list()
         self.consume(TokenType.RIGHT_PAREN)
 
-        self.consume(TokenType.LEFT_BRACKET)
-        op_token_types = []
-        op_token_values = []
-        while not self.expect(TokenType.RIGHT_BRACKET):
-            if self.current_token.type == TokenType.IDENTIFIER:
-                op_token_types.append(TokenType.IDENTIFIER)
-                op_token_values.append(self.current_token.value)
-            elif self.current_token.type not in _TOKEN_SYMBOL_MAP:
-                self.error(f"Token '{self.current_token.value}' cannot be part of an operator symbol", TokenType.IDENTIFIER)
-            else:
-                op_token_types.append(self.current_token.type)
-                op_token_values.append(None)
-            self.advance()
-        self.consume(TokenType.RIGHT_BRACKET)
+        def _parse_op_bracket():
+            self.consume(TokenType.LEFT_BRACKET)
+            tt_list = []
+            tv_list = []
+            while not self.expect(TokenType.RIGHT_BRACKET):
+                if self.current_token.type == TokenType.IDENTIFIER:
+                    tt_list.append(TokenType.IDENTIFIER)
+                    tv_list.append(self.current_token.value)
+                elif self.current_token.type not in _TOKEN_SYMBOL_MAP:
+                    self.error(f"Token '{self.current_token.value}' cannot be part of an operator symbol", TokenType.IDENTIFIER)
+                else:
+                    tt_list.append(self.current_token.type)
+                    tv_list.append(None)
+                self.advance()
+            self.consume(TokenType.RIGHT_BRACKET)
+            return tt_list, tv_list
 
-        symbol           = self._tokens_to_op_key(op_token_types, op_token_values)
-        mangled_fragment = self._mangle_op_symbol(symbol)
-        func_name        = f"operator__{mangled_fragment}"
+        op_token_types, op_token_values = _parse_op_bracket()
+        symbol = self._tokens_to_op_key(op_token_types, op_token_values)
+
+        # Optional second bracket -- ternary operator: a [lop] b [rop] c
+        symbol2 = None
+        if self.expect(TokenType.LEFT_BRACKET):
+            op2_types, op2_values = _parse_op_bracket()
+            symbol2 = self._tokens_to_op_key(op2_types, op2_values)
+
+        if symbol2 is not None:
+            if len(params) == 1:
+                # Circumfix operator: [lop] x [rop], one parameter
+                pass
+            elif len(params) != 3:
+                self.error("Two-bracket operator requires either 1 parameter (circumfix) or 3 parameters (ternary)")
+            mangled_fragment = self._mangle_op_symbol(symbol) + '__' + self._mangle_op_symbol(symbol2)
+        else:
+            mangled_fragment = self._mangle_op_symbol(symbol)
+        func_name = f"operator__{mangled_fragment}"
 
         self.consume(TokenType.RETURN_ARROW)
         return_type = self.type_spec()
@@ -895,10 +954,24 @@ class FluxParser:
                 _pre_contract_names.append(contract_name)
                 _pre_contract_arities.append(len(call_args) if call_args is not None else None)
 
+        unary_binding = None  # None | 'prefix' | 'postfix' -- set in non-prototype path
         if self.expect(TokenType.SEMICOLON):
             self.advance()
             body = Block([])
             is_prototype = True
+        elif self.expect(TokenType.RETURN_ARROW):
+            # Brace-omitted single-statement return: operator(...) [...] -> type -> expr;
+            for param in params:
+                if param.name is None:
+                    self.error(f"Operator definition requires parameter names, but parameter of type {param.type_spec} has no name")
+            for param in params:
+                if param.name:
+                    self.symbol_table.define(param.name, SymbolKind.VARIABLE, param.type_spec)
+            self.advance()  # consume '->'
+            expr = self.expression()
+            self.consume(TokenType.SEMICOLON)
+            body = Block([ReturnStatement(expr)])
+            is_prototype = False
         else:
             body = self.block()
             if contract_stmts:
@@ -928,6 +1001,30 @@ class FluxParser:
             if _pre_contract_names or _post_contract_names:
                 self._validate_contract_binding(func_name, _pre_contract_names, _pre_contract_arities,
                                                 _post_contract_names, _post_contract_arities)
+            # Parse optional unary binding: # binding {:this}  or  # binding {this:}
+            # Must be checked BEFORE consuming the terminating ';'.
+            # Only valid when the operator has exactly one parameter.
+            if self.expect(TokenType.TAG):
+                next_tok = self.tokens[self.position + 1] if self.position + 1 < len(self.tokens) else None
+                if next_tok and next_tok.type == TokenType.IDENTIFIER and next_tok.value == 'binding':
+                    if len(params) != 1:
+                        self.error("# binding on an operator definition is only valid for unary operators (exactly one parameter)")
+                    self.advance()  # consume TAG (#)
+                    self.advance()  # consume 'binding'
+                    self.consume(TokenType.LEFT_BRACE)
+                    if self.expect(TokenType.COLON):
+                        # {:this} -- postfix
+                        self.advance()  # consume ':'
+                        self.consume(TokenType.THIS)
+                        unary_binding = 'postfix'
+                    elif self.expect(TokenType.THIS):
+                        # {this:} -- prefix
+                        self.advance()  # consume 'this'
+                        self.consume(TokenType.COLON)
+                        unary_binding = 'prefix'
+                    else:
+                        self.error("Unary # binding must be {:this} for postfix or {this:} for prefix")
+                    self.consume(TokenType.RIGHT_BRACE)
             self.consume(TokenType.SEMICOLON)
             is_prototype = False
 
@@ -939,7 +1036,21 @@ class FluxParser:
         _tmpl_scope_ctx.__exit__(None, None, None)
         from ftypesys import Operator as _Operator
         _builtin_op_values = {op.value for op in _Operator}
-        if symbol in _builtin_op_values:
+        if unary_binding is not None:
+            # Unary custom operator -- register in prefix or postfix table only.
+            if unary_binding == 'prefix':
+                self._custom_prefix_ops[symbol] = func_name
+            else:
+                self._custom_postfix_ops[symbol] = func_name
+        elif symbol2 is not None:
+            if len(params) == 1:
+                # Circumfix operator: [lop] x [rop]
+                self._custom_circumfix_ops[(symbol, symbol2)] = func_name
+            else:
+                # Ternary custom operator: a [lop] b [rop] c
+                self._custom_ternary_ops[(symbol, symbol2)] = func_name
+            self.symbol_table.define(symbol2, SymbolKind.OPERATOR)
+        elif symbol in _builtin_op_values:
             # Overloading a built-in operator is only permitted when at least one
             # parameter is an object or struct type - OR the overload is templated
             # (in which case the concrete types are not known yet).
@@ -982,13 +1093,45 @@ class FluxParser:
             no_mangle=False
         ).set_location(tok.line, tok.column)
 
+    def _match_custom_ternary_left(self):
+        """
+        Greedy longest-match against the LEFT symbols of all registered ternary operators.
+        Returns (left_symbol, token_count) or (None, 0).
+        """
+        left_syms = {lsym: lsym for lsym, _ in self._custom_ternary_ops}
+        return self._match_custom_unary_op(left_syms)
+
     def custom_op_expression(self) -> Expression:
         """
-        custom_op_expression -> multiplicative_expression (custom_op multiplicative_expression)*
+        custom_op_expression -> multiplicative_expression
+                                  ( custom_binary_op multiplicative_expression
+                                  | custom_ternary_left multiplicative_expression custom_ternary_right multiplicative_expression
+                                  )*
         """
         expr = self.multiplicative_expression()
 
         while True:
+            # Check ternary operators first (longer patterns take precedence).
+            if self._custom_ternary_ops:
+                matched_left, left_len = self._match_custom_ternary_left()
+                if matched_left is not None:
+                    tok = self.current_token
+                    for _ in range(left_len):
+                        self.advance()
+                    mid = self.multiplicative_expression()
+                    # Now match the right symbol of the pair.
+                    # Find which pair(s) have this left symbol.
+                    right_syms = {rsym: rsym for (lsym, rsym) in self._custom_ternary_ops if lsym == matched_left}
+                    matched_right, right_len = self._match_custom_unary_op(right_syms)
+                    if matched_right is None:
+                        self.error(f"Expected right operator of ternary '{matched_left}' ... '{list(right_syms)[0]}'")
+                    for _ in range(right_len):
+                        self.advance()
+                    right = self.multiplicative_expression()
+                    func_name = self._custom_ternary_ops[(matched_left, matched_right)]
+                    expr = FunctionCall(func_name, [expr, mid, right]).set_location(tok.line, tok.column)
+                    continue
+
             matched_symbol, matched_length = self._match_custom_op()
             if matched_symbol is None:
                 break
@@ -1064,7 +1207,39 @@ class FluxParser:
             if self.expect(TokenType.OBJECT):
                 break
         return self.object_def(trait_names=trait_names)
-    
+
+    def _is_bare_function_def(self) -> bool:
+        """
+        Lookahead predicate: returns True when the current position begins a
+        bare function definition (no 'def' keyword):
+
+            name([params]) -> type ;
+            name([params]) -> type { body } ;
+
+        Pattern: IDENTIFIER '(' ... ')' '->'
+        The lookahead never consumes tokens.
+        """
+        with self._lookahead():
+            if not self.expect(TokenType.IDENTIFIER):
+                return False
+            self.advance()
+            if not self.expect(TokenType.LEFT_PAREN):
+                return False
+            self.advance()
+            depth = 1
+            while depth > 0 and not self.expect(TokenType.EOF):
+                if self.expect(TokenType.LEFT_PAREN):
+                    depth += 1
+                elif self.expect(TokenType.RIGHT_PAREN):
+                    depth -= 1
+                    if depth == 0:
+                        break
+                self.advance()
+            if not self.expect(TokenType.RIGHT_PAREN):
+                return False
+            self.advance()
+            return self.expect(TokenType.RETURN_ARROW)
+
     def statement(self) -> Optional[Statement]:
         """
         statement -> 
@@ -1113,7 +1288,7 @@ class FluxParser:
                 self.advance()
             
             is_asm = self.expect(TokenType.ASM)
-            is_func = self.expect(TokenType.DEF) or self.expect(TokenType.INLINE) or self.current_token.type in _CALLING_CONV_TOKENS
+            is_func = self.expect(TokenType.DEF) or self.expect(TokenType.INLINE) or self.current_token.type in _CALLING_CONV_TOKENS or self._is_bare_function_def()
             
             # Restore position
             self.position = saved_pos
@@ -1165,6 +1340,8 @@ class FluxParser:
         elif self.expect(TokenType.DEF):
             return self.function_def()
         elif self.current_token.type in _CALLING_CONV_TOKENS:
+            return self.function_def()
+        elif self._is_bare_function_def():
             return self.function_def()
         elif self.expect(TokenType.ENUM):
             return self.enum_def()
@@ -1235,6 +1412,8 @@ class FluxParser:
             return self.block_statement()
         elif self._is_type_func_def():
             return self.type_func_def()
+        elif self.is_dual_assign_declaration():
+            return self.dual_assign_declaration()
         elif self.is_variable_declaration():
             return self.variable_declaration_statement()
         elif self.expect(TokenType.UNSIGNED):
@@ -1322,6 +1501,9 @@ class FluxParser:
             if self._in_comptime == 0:
                 self.error("'fluxvm' is only valid inside a 'comptime' block")
             return self.fluxvm_statement()
+        elif (self.expect(TokenType.IDENTIFIER) and self.current_token.value == 'error'
+              and self.peek() is not None and self.peek().type != TokenType.ASSIGN):
+            return self.error_return_statement()
         else:
             return self.expression_statement()
     
@@ -2431,15 +2613,13 @@ class FluxParser:
             is_inline = True
             self.advance()
         
-        # Consume 'def' OR a calling-convention keyword (already consumed by caller when CC-prefixed)
+        # Consume 'def' OR a calling-convention keyword if present; bare functions omit both
         if self.current_token.type in _CALLING_CONV_TOKENS:
             # Calling convention keyword stands in place of 'def'
             calling_conv = _CALLING_CONV_TOKEN_TO_STR[self.current_token.type]
             self.advance()
         elif self.expect(TokenType.DEF):
             self.advance()
-        else:
-            self.error("Expected 'def' or calling convention keyword", TokenType.DEF)
         
         # Check if this is a function pointer declaration (def{}* or cc{}*)
         if self.expect(TokenType.FUNCTION_POINTER):
@@ -2682,6 +2862,12 @@ class FluxParser:
             self.consume(TokenType.RETURN_ARROW)
         return_type = self.type_spec()
 
+        # Parse optional error channel type: -> int ^| ErrType
+        error_type = None
+        if self.expect(TokenType.XOR_OP):
+            self.advance()
+            error_type = self.type_spec()
+
         # NOTE: _active_template_params intentionally stays set through the body parse
         # so that template struct usages inside the body (e.g. myStru<T> x;) are also
         # deferred correctly.  It is restored after the entire function is parsed.
@@ -2728,7 +2914,8 @@ class FluxParser:
                 # Add the first prototype with its tags
                 _first_fd = FunctionDef(name, _real_params, return_type, Block([]),
                                         is_const, is_volatile, True, no_mangle, _is_var, calling_conv,
-                                        False, is_inline, _first_deprecated, _first_effect_ann, _first_attenuate_ann)
+                                        False, is_inline, _first_deprecated, _first_effect_ann, _first_attenuate_ann,
+                                        error_type=error_type)
                 prototypes.append(_first_fd)
                 
                 # Parse additional prototypes
@@ -2804,6 +2991,11 @@ class FluxParser:
                     
                         self.consume(TokenType.RETURN_ARROW)
                         proto_return_type = self.type_spec()
+                        # Parse optional error channel type for this prototype
+                        proto_error_type = None
+                        if self.expect(TokenType.XOR_OP):
+                            self.advance()
+                            proto_error_type = self.type_spec()
 
                     # Parse tags for this prototype entry
                     _proto_effect_ann = None
@@ -2833,7 +3025,8 @@ class FluxParser:
                     # no_mangle applies to ALL functions in this comma-separated list
                     _proto_fd = FunctionDef(proto_name, _proto_real, proto_return_type,
                                             Block([]), is_const, is_volatile, True, no_mangle, _proto_is_var, calling_conv,
-                                            False, is_inline, _proto_deprecated, _proto_effect_ann, _proto_attenuate_ann)
+                                            False, is_inline, _proto_deprecated, _proto_effect_ann, _proto_attenuate_ann,
+                                            error_type=proto_error_type)
                     if proto_template_params:
                         _proto_fd._is_trait_template_proto = True
                     prototypes.append(_proto_fd)
@@ -2896,6 +3089,66 @@ class FluxParser:
                 else:
                     self.error(f"Recursive function '{name}' declared with '<~' must have exactly one parameter, or no parameters with void return")
 
+        # Parse optional 'as operator[sym]' or 'as operator[sym1][sym2]' suffix.
+        # Present before the prototype ';' or the definition body '{'.
+        _as_op_symbol = None   # left (or only) operator symbol string
+        _as_op_symbol2 = None  # right operator symbol string (ternary only)
+        _as_op_binding = None  # None | 'prefix' | 'postfix' (unary)
+        if self.expect(TokenType.AS):
+            self.advance()  # consume 'as'
+            self.consume(TokenType.OPERATOR)
+            # Parse first bracket group
+            self.consume(TokenType.LEFT_BRACKET)
+            _as_tt1, _as_tv1 = [], []
+            while not self.expect(TokenType.RIGHT_BRACKET):
+                if self.current_token.type == TokenType.IDENTIFIER:
+                    _as_tt1.append(TokenType.IDENTIFIER)
+                    _as_tv1.append(self.current_token.value)
+                elif self.current_token.type not in _TOKEN_SYMBOL_MAP:
+                    self.error(f"Token '{self.current_token.value}' cannot be part of an operator symbol", TokenType.IDENTIFIER)
+                else:
+                    _as_tt1.append(self.current_token.type)
+                    _as_tv1.append(None)
+                self.advance()
+            self.consume(TokenType.RIGHT_BRACKET)
+            _as_op_symbol = self._tokens_to_op_key(_as_tt1, _as_tv1)
+            # Optional second bracket group (ternary)
+            if self.expect(TokenType.LEFT_BRACKET):
+                self.consume(TokenType.LEFT_BRACKET)
+                _as_tt2, _as_tv2 = [], []
+                while not self.expect(TokenType.RIGHT_BRACKET):
+                    if self.current_token.type == TokenType.IDENTIFIER:
+                        _as_tt2.append(TokenType.IDENTIFIER)
+                        _as_tv2.append(self.current_token.value)
+                    elif self.current_token.type not in _TOKEN_SYMBOL_MAP:
+                        self.error(f"Token '{self.current_token.value}' cannot be part of an operator symbol", TokenType.IDENTIFIER)
+                    else:
+                        _as_tt2.append(self.current_token.type)
+                        _as_tv2.append(None)
+                    self.advance()
+                self.consume(TokenType.RIGHT_BRACKET)
+                _as_op_symbol2 = self._tokens_to_op_key(_as_tt2, _as_tv2)
+            # Optional unary binding (only when exactly one param and one symbol)
+            if _as_op_symbol2 is None and self.expect(TokenType.TAG):
+                _nb = self.tokens[self.position + 1] if self.position + 1 < len(self.tokens) else None
+                if _nb and _nb.type == TokenType.IDENTIFIER and _nb.value == 'binding':
+                    if len(real_parameters) != 1:
+                        self.error("# binding on 'as operator' is only valid for unary operators (exactly one parameter)")
+                    self.advance()  # consume '#'
+                    self.advance()  # consume 'binding'
+                    self.consume(TokenType.LEFT_BRACE)
+                    if self.expect(TokenType.COLON):
+                        self.advance()
+                        self.consume(TokenType.THIS)
+                        _as_op_binding = 'postfix'
+                    elif self.expect(TokenType.THIS):
+                        self.advance()
+                        self.consume(TokenType.COLON)
+                        _as_op_binding = 'prefix'
+                    else:
+                        self.error("Unary # binding must be {:this} for postfix or {this:} for prefix")
+                    self.consume(TokenType.RIGHT_BRACE)
+
         if self.expect(TokenType.TAG) or self.expect(TokenType.SEMICOLON):
             # Prototype path: parse any # tags then consume the semicolon.
             while self.expect(TokenType.TAG):
@@ -2921,6 +3174,24 @@ class FluxParser:
                 is_prototype = True
                 self.advance()
                 body = Block([])
+        elif self.expect(TokenType.RETURN_ARROW):
+            # Brace-omitted single-statement return: name([params]) -> type -> expr;
+            # If any real parameter lacks a name, this is an error for a definition
+            for param in real_parameters:
+                if param.name is None:
+                    self.error(f"Function definition requires parameter names, but parameter of type {param.type_spec} has no name")
+            if self._function_depth > 0:
+                self.error(f"Illegal nested function definition '{name}': function definitions are not allowed inside another function body")
+            for param in real_parameters:
+                if param.name:
+                    self.symbol_table.define(param.name, SymbolKind.VARIABLE, param.type_spec)
+            self.advance()  # consume '->'
+            self._function_depth += 1
+            expr = self.expression()
+            self._function_depth -= 1
+            self.consume(TokenType.SEMICOLON)
+            body = Block([ReturnStatement(expr)])
+            is_prototype = False
         else:
             # Inside a trait body only prototypes are allowed - a missing ';' would
             # otherwise fall through to block() and emit a confusing LEFT_BRACE error.
@@ -3009,7 +3280,8 @@ class FluxParser:
         if template_params:
             func_def = FunctionDef(name, real_parameters, return_type, body, is_const,
                                    is_volatile, is_prototype, no_mangle, is_variadic, calling_conv,
-                                   is_recursive, is_inline, is_deprecated, effect_ann, attenuate_ann)
+                                   is_recursive, is_inline, is_deprecated, effect_ann, attenuate_ann,
+                                   error_type=error_type)
             if self._in_comptime > 0:
                 func_def._is_comptime_only = True
             self._register_template_function(name, template_params, func_def,
@@ -3021,9 +3293,47 @@ class FluxParser:
                 return func_def
             return None
 
-        return FunctionDef(name, real_parameters, return_type, body, is_const,
-                          is_volatile, is_prototype, no_mangle, is_variadic, calling_conv,
-                          is_recursive, is_inline, is_deprecated, effect_ann, attenuate_ann).set_location(tok.line, tok.column)
+        func_def = FunctionDef(name, real_parameters, return_type, body, is_const,
+                               is_volatile, is_prototype, no_mangle, is_variadic, calling_conv,
+                               is_recursive, is_inline, is_deprecated, effect_ann, attenuate_ann,
+                               error_type=error_type).set_location(tok.line, tok.column)
+
+        # Register 'as operator' if present
+        if _as_op_symbol is not None:
+            from ftypesys import Operator as _Operator
+            _builtin_op_values = {op.value for op in _Operator}
+            if _as_op_symbol2 is not None:
+                if len(real_parameters) == 1:
+                    # Circumfix 'as operator': [lop] x [rop]
+                    self._custom_circumfix_ops[(_as_op_symbol, _as_op_symbol2)] = name
+                elif len(real_parameters) == 3:
+                    # Ternary 'as operator': a [lop] b [rop] c
+                    self._custom_ternary_ops[(_as_op_symbol, _as_op_symbol2)] = name
+                else:
+                    self.error("Two-bracket 'as operator' requires either 1 parameter (circumfix) or 3 parameters (ternary)")
+                self.symbol_table.define(_as_op_symbol2, SymbolKind.OPERATOR)
+            elif _as_op_binding is not None:
+                # Unary
+                if _as_op_binding == 'prefix':
+                    self._custom_prefix_ops[_as_op_symbol] = name
+                else:
+                    self._custom_postfix_ops[_as_op_symbol] = name
+            elif _as_op_symbol in _builtin_op_values:
+                if not template_params:
+                    def _is_non_builtin(ts):
+                        return (ts.custom_typename is not None or
+                                ts.base_type in (DataType.STRUCT, DataType.OBJECT, DataType.DATA) or
+                                ts.is_pointer)
+                    if not any(_is_non_builtin(p.type_spec) for p in real_parameters):
+                        self.error(
+                            f"Overloading built-in operator '{_as_op_symbol}' requires at least "
+                            f"one parameter to be a non-builtin type"
+                        )
+            else:
+                self._custom_operators[_as_op_symbol] = name
+            self.symbol_table.define(_as_op_symbol, SymbolKind.OPERATOR)
+
+        return func_def
 
     def _is_function_pointer_declaration(self) -> bool:
         """
@@ -4497,7 +4807,7 @@ class FluxParser:
                 else:
                     variables.append(var_decl)
                 self.consume(TokenType.SEMICOLON)
-            elif self.expect(TokenType.INLINE) or self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
+            elif self.expect(TokenType.INLINE) or self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS or self._is_bare_function_def():
                 if self.expect(TokenType.DEF) and self.peek().type == TokenType.FUNCTION_POINTER:
                     self.advance() #def
                     self.advance() #{}*
@@ -5249,6 +5559,88 @@ class FluxParser:
                              TokenType.COMMA, TokenType.LEFT_BRACKET, TokenType.FROM,
                              TokenType.ADDRESS_ASSIGN)
 
+    def is_dual_assign_declaration(self) -> bool:
+        """
+        Check if the current position starts a dual-assign declaration:
+            success_type ^| error_type success_name, error_name = call();
+
+        Strategy: consume the leading type spec (same logic as is_variable_declaration),
+        then check that the next token is XOR_OP.
+        """
+        with self._lookahead():
+            # Skip const/volatile/signed/unsigned qualifiers
+            if self.expect(TokenType.CONST):
+                self.advance()
+            if self.expect(TokenType.VOLATILE):
+                self.advance()
+            if self.expect(TokenType.SIGNED, TokenType.UNSIGNED):
+                self.advance()
+
+            # Must have a base type
+            if not self.expect(TokenType.SINT, TokenType.UINT, TokenType.FLOAT_KW, TokenType.DOUBLE_KW,
+                               TokenType.CHAR, TokenType.BOOL_KW, TokenType.BYTE, TokenType.DATA, TokenType.VOID,
+                               TokenType.SLONG, TokenType.ULONG,
+                               TokenType.STRUCT, TokenType.OBJECT, TokenType.IDENTIFIER, TokenType.DICT):
+                return False
+            self.advance()
+
+            # Handle namespace-qualified type names: A::B::C
+            while self.expect(TokenType.SCOPE):
+                self.advance()
+                if self.expect(TokenType.IDENTIFIER):
+                    self.advance()
+                else:
+                    break
+
+            # Handle template args: MyStruct<int>
+            if self.expect(TokenType.LESS_THAN):
+                self.advance()
+                depth = 1
+                while depth > 0 and not self.expect(TokenType.EOF):
+                    if self.expect(TokenType.LESS_THAN):
+                        depth += 1
+                    elif self.expect(TokenType.GREATER_THAN):
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    self.advance()
+                if self.expect(TokenType.GREATER_THAN):
+                    self.advance()
+
+            # Handle optional bit-width specification {width}
+            if self.expect(TokenType.LEFT_BRACE):
+                self.advance()
+                if self.expect(TokenType.SINT_LITERAL):
+                    self.advance()
+                if self.expect(TokenType.COLON) or self.expect(TokenType.SCOPE):
+                    self.advance()
+                    if self.expect(TokenType.SINT_LITERAL):
+                        self.advance()
+                if self.expect(TokenType.RIGHT_BRACE):
+                    self.advance()
+
+            # Skip pointer levels
+            while self.expect(TokenType.MULTIPLY):
+                self.advance()
+
+            # Skip array dimensions
+            while self.expect(TokenType.LEFT_BRACKET):
+                self.advance()
+                bracket_depth = 1
+                while bracket_depth > 0 and not self.expect(TokenType.EOF):
+                    if self.expect(TokenType.LEFT_BRACKET):
+                        bracket_depth += 1
+                    elif self.expect(TokenType.RIGHT_BRACKET):
+                        bracket_depth -= 1
+                        if bracket_depth == 0:
+                            break
+                    self.advance()
+                if self.expect(TokenType.RIGHT_BRACKET):
+                    self.advance()
+
+            # After the type spec the next token must be XOR_OP (^|)
+            return self.expect(TokenType.XOR_OP)
+
     # ------------------------------------------------------------------
     # Type function definitions
     # ------------------------------------------------------------------
@@ -5917,7 +6309,8 @@ class FluxParser:
                         recast.suppress_invalidate = False
                     initializers.append(recast)
                 else:
-                    self.error("FROM syntax requires a custom type (struct)")
+                    # Primitive type: treat as bit reinterpretation via CastExpression
+                    initializers.append(CastExpression(type_spec, source_expr).set_location(tok.line, tok.column))
             elif self.expect(TokenType.ASSIGN):
                 self.advance()
                 init_expr = self.expression()
@@ -6488,37 +6881,65 @@ class FluxParser:
         
         return ",".join(clobbers)
     
+    def block_or_single_stmt(self) -> Block:
+        """
+        block_or_single_stmt -> '{' ... '}'
+                              | '->' expression
+                              | expression
+
+        Single-statement form does NOT consume a trailing ';'. The
+        enclosing if_statement owns the ';' between branches and the
+        final terminating ';'.
+        Result is always a Block.
+        """
+        tok = self.current_token
+        if self.expect(TokenType.LEFT_BRACE):
+            return self.block()
+        if self.expect(TokenType.RETURN_ARROW):
+            self.advance()
+            expr = self.expression()
+            stmt = ReturnStatement(expr).set_location(tok.line, tok.column)
+        else:
+            expr = self.expression()
+            stmt = ExpressionStatement(expr).set_location(tok.line, tok.column)
+        return Block([stmt]).set_location(tok.line, tok.column)
+
     def if_statement(self) -> IfStatement:
         """
-        if_statement -> 'if' '(' expression ')' block (('elif' | 'else' 'if') '(' expression ')' block)* ('else' block)? ';'
+        if_statement -> 'if' '(' expression ')' block_or_single_stmt
+                        (('elif' | 'else' 'if') '(' expression ')' block_or_single_stmt)*
+                        ('else' block_or_single_stmt)? ';'
+
+        Braceless single-statement bodies do not carry their own ';'.
+        The single ';' at the end of the chain terminates the whole if.
+        Brace-block bodies also work and the same terminating ';' applies.
         """
         tok = self.current_token
         self.consume(TokenType.IF)
         self.consume(TokenType.LEFT_PAREN)
         condition = self.expression()
         self.consume(TokenType.RIGHT_PAREN)
-        then_block = self.block()
-        
+        then_block = self.block_or_single_stmt()
+
         elif_blocks = []
         while self.expect(TokenType.ELIF) or (self.expect(TokenType.ELSE) and self.peek() and self.peek().type == TokenType.IF):
             if self.expect(TokenType.ELIF):
                 self.advance()
             else:
-                # Handle 'else if'
                 self.advance()  # consume 'else'
                 self.advance()  # consume 'if'
-            
+
             self.consume(TokenType.LEFT_PAREN)
             elif_condition = self.expression()
             self.consume(TokenType.RIGHT_PAREN)
-            elif_block = self.block()
+            elif_block = self.block_or_single_stmt()
             elif_blocks.append((elif_condition, elif_block))
-        
+
         else_block = None
         if self.expect(TokenType.ELSE):
             self.advance()
-            else_block = self.block()
-        
+            else_block = self.block_or_single_stmt()
+
         self.consume(TokenType.SEMICOLON)
         return IfStatement(condition, then_block, elif_blocks, else_block).set_location(tok.line, tok.column)
     
@@ -6578,6 +6999,7 @@ class FluxParser:
         # Check if it's a for-in loop by looking ahead
         is_for_in = False
         
+        is_destructure_for_in = False
         with self._lookahead():
             # Look for pattern: identifier (',' identifier)* 'in' expression
             if self.expect(TokenType.IDENTIFIER):
@@ -6590,16 +7012,54 @@ class FluxParser:
                         break
                 if self.expect(TokenType.IN):
                     is_for_in = True
+            # Look for pattern: auto '{' identifier (',' identifier)* '}' 'in'
+            # or: auto identifier 'in'
+            elif self.expect(TokenType.AUTO):
+                self.advance()
+                if self.expect(TokenType.LEFT_BRACE):
+                    self.advance()
+                    if self.expect(TokenType.IDENTIFIER):
+                        self.advance()
+                        while self.expect(TokenType.COMMA):
+                            self.advance()
+                            if self.expect(TokenType.IDENTIFIER):
+                                self.advance()
+                            else:
+                                break
+                        if self.expect(TokenType.RIGHT_BRACE):
+                            self.advance()
+                            if self.expect(TokenType.IN):
+                                is_for_in = True
+                                is_destructure_for_in = True
+                elif self.expect(TokenType.IDENTIFIER):
+                    self.advance()
+                    if self.expect(TokenType.IN):
+                        is_for_in = True
+                        is_destructure_for_in = True
 
         if is_for_in:
             # for-in loop
             variables = []
-            variables.append(self.consume(TokenType.IDENTIFIER).value)
-            
-            while self.expect(TokenType.COMMA):
-                self.advance()
+            if is_destructure_for_in:
+                # consume 'auto'
+                self.consume(TokenType.AUTO)
+                if self.expect(TokenType.LEFT_BRACE):
+                    # auto {x, y, ...} in iterable
+                    self.consume(TokenType.LEFT_BRACE)
+                    variables.append(self.consume(TokenType.IDENTIFIER).value)
+                    while self.expect(TokenType.COMMA):
+                        self.advance()
+                        variables.append(self.consume(TokenType.IDENTIFIER).value)
+                    self.consume(TokenType.RIGHT_BRACE)
+                else:
+                    # auto x in iterable
+                    variables.append(self.consume(TokenType.IDENTIFIER).value)
+            else:
                 variables.append(self.consume(TokenType.IDENTIFIER).value)
-            
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    variables.append(self.consume(TokenType.IDENTIFIER).value)
+
             self.consume(TokenType.IN)
             iterable = self.expression()
             self.consume(TokenType.RIGHT_PAREN)
@@ -6607,8 +7067,8 @@ class FluxParser:
             body = self.block()
             self._loop_depth -= 1
             self.consume(TokenType.SEMICOLON)
-            
-            return ForInLoop(variables, iterable, body).set_location(tok.line, tok.column)
+
+            return ForInLoop(variables, iterable, body, is_destructure=is_destructure_for_in).set_location(tok.line, tok.column)
         else:
             # C-style for loop
             init = None
@@ -6758,6 +7218,62 @@ class FluxParser:
         self.consume(TokenType.SEMICOLON)
         return ReturnStatement(value).set_location(tok.line, tok.column)
     
+    def error_return_statement(self) -> 'ErrorReturnStatement':
+        """
+        error_return_statement ->
+            'error' ';'
+            'error' expression ';'
+            'error' '->' expression ';'
+            'error' 'return' expression ';'
+
+        The 'error' identifier has already been confirmed as the current token.
+        """
+        tok = self.current_token
+        self.advance()  # consume 'error'
+        value = None
+        if self.expect(TokenType.RETURN_ARROW):
+            # error -> expr;
+            self.advance()
+            value = self.expression()
+        elif self.expect(TokenType.RETURN):
+            # error return expr;
+            self.advance()
+            value = self.expression()
+        elif not self.expect(TokenType.SEMICOLON):
+            # error expr;
+            value = self.expression()
+        self.consume(TokenType.SEMICOLON)
+        return ErrorReturnStatement(value).set_location(tok.line, tok.column)
+
+    def dual_assign_declaration(self) -> 'DualAssignDeclaration':
+        """
+        dual_assign_declaration ->
+            type ^| type IDENTIFIER ',' IDENTIFIER '=' expression ';'
+
+        Declares two variables from a single dual-return call:
+            int ^| ErrType result, err = f();
+        """
+        tok = self.current_token
+        success_type = self.type_spec()
+        self.consume(TokenType.XOR_OP, "Expected '^|' in dual-assign declaration")
+        error_type = self.type_spec()
+        success_name = self.consume(TokenType.IDENTIFIER, "Expected success variable name").value
+        self.consume(TokenType.COMMA, "Expected ',' between variable names in dual-assign declaration")
+        error_name = self.consume(TokenType.IDENTIFIER, "Expected error variable name").value
+        self.consume(TokenType.ASSIGN, "Expected '=' in dual-assign declaration")
+        call_expr = self.expression()
+        self.consume(TokenType.SEMICOLON)
+        # Register both names in the symbol table as variables
+        self.symbol_table.define(success_name, SymbolKind.VARIABLE, success_type)
+        self.symbol_table.define(error_name, SymbolKind.VARIABLE, error_type)
+        return DualAssignDeclaration(
+            success_type=success_type,
+            error_type=error_type,
+            success_name=success_name,
+            error_name=error_name,
+            call_expr=call_expr,
+        ).set_location(tok.line, tok.column)
+
     def break_statement(self) -> BreakStatement:
         """
         break_statement -> 'break' ';'
@@ -7448,6 +7964,15 @@ class FluxParser:
         expr = self.cast_expression()
         
         while self.expect(TokenType.MULTIPLY, TokenType.DIVIDE, TokenType.MODULO, TokenType.EXPONENT):
+            # Do not consume this token if it is the start of a registered ternary
+            # right-hand symbol (e.g. the '%' in '%$'). The ternary match runs in
+            # custom_op_expression above us; consuming the token here would eat it
+            # before the right-symbol check ever runs.
+            if self._custom_ternary_ops:
+                right_syms = {rsym: rsym for (_, rsym) in self._custom_ternary_ops}
+                _m, _ = self._match_custom_unary_op(right_syms)
+                if _m is not None:
+                    break
             op_tok = self.current_token
             if self.current_token.type == TokenType.MULTIPLY:
                 operator = Operator.MUL
@@ -7602,6 +8127,32 @@ class FluxParser:
             operand = self.unary_expression()
             return UnaryOp(Operator.DECREMENT, operand).set_location(tok.line, tok.column)
         else:
+            # Check for a custom prefix unary operator before falling through
+            if self._custom_prefix_ops:
+                matched_sym, matched_len = self._match_custom_unary_op(self._custom_prefix_ops)
+                if matched_sym is not None:
+                    tok = self.current_token
+                    for _ in range(matched_len):
+                        self.advance()
+                    operand = self.unary_expression()
+                    func_name = self._custom_prefix_ops[matched_sym]
+                    return FunctionCall(func_name, [operand]).set_location(tok.line, tok.column)
+            if self._custom_circumfix_ops:
+                left_syms = {lsym: lsym for lsym, _ in self._custom_circumfix_ops}
+                matched_left, left_len = self._match_custom_unary_op(left_syms)
+                if matched_left is not None:
+                    tok = self.current_token
+                    for _ in range(left_len):
+                        self.advance()
+                    operand = self.unary_expression()
+                    right_syms = {rsym: rsym for (lsym, rsym) in self._custom_circumfix_ops if lsym == matched_left}
+                    matched_right, right_len = self._match_custom_unary_op(right_syms)
+                    if matched_right is None:
+                        self.error(f"Expected closing operator of circumfix '{matched_left}' ... '{list(right_syms)[0]}'")
+                    for _ in range(right_len):
+                        self.advance()
+                    func_name = self._custom_circumfix_ops[(matched_left, matched_right)]
+                    return FunctionCall(func_name, [operand]).set_location(tok.line, tok.column)
             return self.postfix_expression()
     
     # ------------------------------------------------------------------
@@ -9465,7 +10016,7 @@ class FluxParser:
                 self.consume(TokenType.LEFT_PAREN, "Expected '(' after 'if' in if-expression")
                 condition = self.expression()
                 self.consume(TokenType.RIGHT_PAREN, "Expected ')' after condition in if-expression")
-                
+
                 # Check for else clause
                 else_expr = None
                 if self.expect(TokenType.ELSE):
@@ -9473,8 +10024,18 @@ class FluxParser:
                     # Parse the else expression as a postfix expression
                     # This handles: else z, else noinit, else (noinit if (...)), etc.
                     else_expr = self.postfix_expression()
-                
+
                 expr = IfExpression(expr, condition, else_expr).set_location(tok.line, tok.column)
+            elif self._custom_postfix_ops:
+                # Custom postfix unary operator: expr [op]
+                matched_sym, matched_len = self._match_custom_unary_op(self._custom_postfix_ops)
+                if matched_sym is None:
+                    break
+                tok = self.current_token
+                for _ in range(matched_len):
+                    self.advance()
+                func_name = self._custom_postfix_ops[matched_sym]
+                expr = FunctionCall(func_name, [expr]).set_location(tok.line, tok.column)
             else:
                 break
         
@@ -9563,6 +10124,11 @@ class FluxParser:
                 # Propagate registered macros so call sites inside f-strings
                 # are recognised and produce macroCall instead of FunctionCall.
                 expr_parser._macros = self._macros
+                expr_parser._custom_circumfix_ops = self._custom_circumfix_ops
+                expr_parser._custom_prefix_ops = self._custom_prefix_ops
+                expr_parser._custom_postfix_ops = self._custom_postfix_ops
+                expr_parser._custom_operators = self._custom_operators
+                expr_parser._custom_ternary_ops = self._custom_ternary_ops
                 expression = expr_parser.expression()
                 
                 parts.append(expression)
@@ -9618,6 +10184,11 @@ class FluxParser:
                 expr_parser = FluxParser(tokens)
                 # Propagate macros so call sites inside i-strings are recognised.
                 expr_parser._macros = self._macros
+                expr_parser._custom_circumfix_ops = self._custom_circumfix_ops
+                expr_parser._custom_prefix_ops = self._custom_prefix_ops
+                expr_parser._custom_postfix_ops = self._custom_postfix_ops
+                expr_parser._custom_operators = self._custom_operators
+                expr_parser._custom_ternary_ops = self._custom_ternary_ops
                 expressions.append(expr_parser.expression())
 
         # Build FStringLiteral parts, substituting {} placeholders positionally
@@ -9830,40 +10401,58 @@ class FluxParser:
             # as a function call - e.g.  $X();  def $X() -> void {};
             # Also handles $~$IDENT and $~$f"..." (codify-then-stringify): codification
             # binds tighter, so the codify result becomes the stringified name.
-            tok = self.current_token
-            self.advance()
-            if self.expect(TokenType.CODIFY):
-                # $~$expr -- resolve the codify expression first, then stringify it
-                resolved = self._consume_codify()
-                return StringLiteral(resolved).set_location(tok.line, tok.column)
-            # Also accept built-in type keywords: $int, $float, $bool, etc.
-            _STRINGIFY_KW = {
-                TokenType.SINT: "int", TokenType.UINT: "uint",
-                TokenType.SLONG: "long", TokenType.ULONG: "ulong",
-                TokenType.FLOAT_KW: "float", TokenType.DOUBLE_KW: "double",
-                TokenType.BOOL_KW: "bool", TokenType.BYTE: "byte",
-            }
-            if self.current_token.type in _STRINGIFY_KW:
-                kw_str = _STRINGIFY_KW[self.current_token.type]
+            # Only enter this branch when '$' is followed by something that belongs to a
+            # stringify expression. If the next token is a symbol character (e.g. '%' in
+            # a custom operator '$%'), do not consume '$' -- fall through so the custom
+            # operator machinery upstream can match the full operator sequence.
+            _next = self.peek()
+            _stringify_valid_next = (
+                _next is not None and (
+                    _next.type == TokenType.IDENTIFIER or
+                    _next.type == TokenType.CODIFY or
+                    _next.type == TokenType.DOT or
+                    _next.type == TokenType.TAG or
+                    _next.type in {
+                        TokenType.SINT, TokenType.UINT, TokenType.SLONG, TokenType.ULONG,
+                        TokenType.FLOAT_KW, TokenType.DOUBLE_KW, TokenType.BOOL_KW, TokenType.BYTE,
+                    }
+                )
+            )
+            if _stringify_valid_next:
+                tok = self.current_token
                 self.advance()
-                return StringLiteral(kw_str).set_location(tok.line, tok.column)
-            if not self.expect(TokenType.IDENTIFIER):
-                self.error("Expected identifier after '$'", TokenType.IDENTIFIER)
-            name = self.current_token.value
-            self.advance()
-            member = None
-            if self.expect(TokenType.DOT):
+                if self.expect(TokenType.CODIFY):
+                    # $~$expr -- resolve the codify expression first, then stringify it
+                    resolved = self._consume_codify()
+                    return StringLiteral(resolved).set_location(tok.line, tok.column)
+                # Also accept built-in type keywords: $int, $float, $bool, etc.
+                _STRINGIFY_KW = {
+                    TokenType.SINT: "int", TokenType.UINT: "uint",
+                    TokenType.SLONG: "long", TokenType.ULONG: "ulong",
+                    TokenType.FLOAT_KW: "float", TokenType.DOUBLE_KW: "double",
+                    TokenType.BOOL_KW: "bool", TokenType.BYTE: "byte",
+                }
+                if self.current_token.type in _STRINGIFY_KW:
+                    kw_str = _STRINGIFY_KW[self.current_token.type]
+                    self.advance()
+                    return StringLiteral(kw_str).set_location(tok.line, tok.column)
+                if not self.expect(TokenType.IDENTIFIER):
+                    self.error("Expected identifier after '$'", TokenType.IDENTIFIER)
+                name = self.current_token.value
                 self.advance()
-                if self.expect(TokenType.IDENTIFIER):
-                    member = self.current_token.value
+                member = None
+                if self.expect(TokenType.DOT):
                     self.advance()
-                elif self.expect(TokenType.TAG):
-                    # $.# - stringify the tag of a tagged union
-                    self.advance()
-                    member = "#"
-                else:
-                    self.error("Expected member name after '.' in stringify expression", TokenType.IDENTIFIER)
-            return Stringify(name, member).set_location(tok.line, tok.column)
+                    if self.expect(TokenType.IDENTIFIER):
+                        member = self.current_token.value
+                        self.advance()
+                    elif self.expect(TokenType.TAG):
+                        # $.# - stringify the tag of a tagged union
+                        self.advance()
+                        member = "#"
+                    else:
+                        self.error("Expected member name after '.' in stringify expression", TokenType.IDENTIFIER)
+                return Stringify(name, member).set_location(tok.line, tok.column)
         elif self.expect(TokenType.CODIFY):
             # ~$f"..." on the RHS of an assignment in comptime context.
             # Treat as an f-string expression that evaluates to a string at VM runtime.

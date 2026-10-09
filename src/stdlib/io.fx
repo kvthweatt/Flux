@@ -98,7 +98,7 @@ namespace standard
                 println(float) -> void # effect {~IO.Console.Output},
                 println(float,int) -> void # effect {~IO.Console.Output},
                 println(double) -> void # effect {~IO.Console.Output},
-                println(double,int) -> void # effect {~IO.Console.Output};
+                println(double,int) -> void # effect {~IO.Console};
 
 #ifdef __WINDOWS__
             // INPUT DEFINITIONS

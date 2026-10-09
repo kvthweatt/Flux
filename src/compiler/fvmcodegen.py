@@ -2545,6 +2545,17 @@ class FVMCodegen:
             self._emit(_instr(opcode))
             return opcode in _PUSHES
 
+        if full_name == 'compiler.symbol_table.lookup':
+            for arg in node.arguments:
+                self._visit_expr(arg)
+            self._emit(_instr(Op.COMPILER_SYMTABLE_LOOKUP, None))
+            return True
+        if full_name == 'compiler.symbol_table.funcinfo':
+            for arg in node.arguments:
+                self._visit_expr(arg)
+            self._emit(_instr(Op.COMPILER_SYMTABLE_FUNCINFO, None))
+            return True
+
         if full_name is not None:
             # Check if this is an object method call: receiver_var.method_name(args)
             # where receiver_var is a local of a known object type registered via
@@ -3802,6 +3813,51 @@ class FVMCodegen:
         """
         obj.member - struct field access or namespace path component.
         """
+        dotted = self._flatten_dotted_name(node)
+        if dotted is not None:
+            # compiler.target.* properties
+            _TARGET_PROPS = {
+                'compiler.target.arch',
+                'compiler.target.os',
+                'compiler.target.abi',
+                'compiler.target.ptr_width',
+                'compiler.target.endian',
+                'compiler.target.cache_line',
+                'compiler.target.page_size',
+                'compiler.target.has_sse',
+                'compiler.target.has_sse2',
+                'compiler.target.has_sse4',
+                'compiler.target.has_avx',
+                'compiler.target.has_avx2',
+                'compiler.target.has_avx512',
+                'compiler.target.has_aes',
+                'compiler.target.has_popcnt',
+                'compiler.target.has_bmi2',
+            }
+            _ST_FILTERED = {
+                'compiler.symbol_table.functions':   'functions',
+                'compiler.symbol_table.structs':     'structs',
+                'compiler.symbol_table.objects':     'objects',
+                'compiler.symbol_table.traits':      'traits',
+                'compiler.symbol_table.interfaces':  'interfaces',
+                'compiler.symbol_table.namespaces':  'namespaces',
+                'compiler.symbol_table.variables':   'variables',
+                'compiler.symbol_table.enums':       'enums',
+                'compiler.symbol_table.unions':      'unions',
+                'compiler.symbol_table.effects':     'effects',
+                'compiler.symbol_table.constraints': 'constraints',
+                'compiler.symbol_table.contracts':   'contracts',
+            }
+            if dotted in _TARGET_PROPS:
+                prop = dotted[len('compiler.target.'):]
+                self._emit(_instr(Op.COMPILER_TARGET_GET, prop))
+                return True
+            if dotted == 'compiler.symbol_table':
+                self._emit(_instr(Op.COMPILER_SYMTABLE))
+                return True
+            if dotted in _ST_FILTERED:
+                self._emit(_instr(Op.COMPILER_SYMTABLE_FILTERED, _ST_FILTERED[dotted]))
+                return True
         if isinstance(node.object, Identifier):
             var_name = node.object.name
             type_name = self._local_types.get(var_name)
@@ -3820,6 +3876,29 @@ class FVMCodegen:
                 self._visit_expr(node.object)
                 self._emit(_instr(Op.STRUCT_LOAD, node.member))
                 return True
+            # Check for compiler.symbol_table intrinsic (property, not a call)
+            dotted = self._flatten_dotted_name(node)
+            if dotted is not None:
+                _ST_FILTERED = {
+                    'compiler.symbol_table.functions':   'functions',
+                    'compiler.symbol_table.structs':     'structs',
+                    'compiler.symbol_table.objects':     'objects',
+                    'compiler.symbol_table.traits':      'traits',
+                    'compiler.symbol_table.interfaces':  'interfaces',
+                    'compiler.symbol_table.namespaces':  'namespaces',
+                    'compiler.symbol_table.variables':   'variables',
+                    'compiler.symbol_table.enums':       'enums',
+                    'compiler.symbol_table.unions':      'unions',
+                    'compiler.symbol_table.effects':     'effects',
+                    'compiler.symbol_table.constraints': 'constraints',
+                    'compiler.symbol_table.contracts':   'contracts',
+                }
+                if dotted == 'compiler.symbol_table':
+                    self._emit(_instr(Op.COMPILER_SYMTABLE))
+                    return True
+                if dotted in _ST_FILTERED:
+                    self._emit(_instr(Op.COMPILER_SYMTABLE_FILTERED, _ST_FILTERED[dotted]))
+                    return True
             # Identifier not a known local or global - namespace path prefix, push nothing
             return False
         elif isinstance(node.object, MemberAccess):

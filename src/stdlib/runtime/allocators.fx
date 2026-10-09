@@ -36,7 +36,7 @@ extern
 #endif;
 
 #ifdef __LINUX__
-def !!heap_mmap(size_t bytes) -> u64
+!!heap_mmap(size_t bytes) -> u64
 {
     u64 result;
     volatile asm
@@ -54,7 +54,7 @@ def !!heap_mmap(size_t bytes) -> u64
     return result;
 } # effect {*Alloc.Virtual & *Unsafe.ASM};
 
-def !!heap_munmap(u64 ptr, size_t bytes) -> void
+!!heap_munmap(u64 ptr, size_t bytes) -> void
 {
     volatile asm
     {

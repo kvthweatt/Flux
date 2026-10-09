@@ -5802,6 +5802,14 @@ class StructTypeHandler:
                             field_value = builder.fpext(field_value, field_llvm_type)
                         elif isinstance(field_value.type, ir.DoubleType) and isinstance(field_llvm_type, ir.FloatType):
                             field_value = builder.fptrunc(field_value, field_llvm_type)
+                        elif (isinstance(field_value.type, ir.PointerType) and
+                              isinstance(field_value.type.pointee, ir.ArrayType) and
+                              isinstance(field_llvm_type, ir.PointerType) and
+                              isinstance(field_llvm_type.pointee, ir.IntType) and
+                              field_llvm_type.pointee.width == 8):
+                            # [N x i8]* from string literal -> i8* field
+                            zero = ir.Constant(ir.IntType(32), 0)
+                            field_value = builder.gep(field_value, [zero, zero], inbounds=True, name="str_gep")
                     result = builder.insert_value(result, field_value, i)
                 instance = result
             else:

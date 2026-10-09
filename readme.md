@@ -1,7 +1,5 @@
 <h1 align="center">Flux</h1>
 
-<h2 align="center"><i>A compiled systems language that stays out of your way.</i></h2>
-
 <p align="center">
     <img width="512" height="512" alt="Flux Logo" src="https://github.com/user-attachments/assets/58da57a7-1924-48a2-ba29-c2040d9343eb" />
 </p>
@@ -18,6 +16,8 @@
 Flux is a compiled, statically typed systems programming language. It has the performance of C and a type system that goes further than C in every direction that matters: arbitrary-width integers with alignment and endianness baked into the type, first-class bit manipulation, opt-in ownership and a totally optional borrow checker, compile-time code generation with `emitflux`, contracts, templates with type geometry constraints, and inline FVM assembly in comptime blocks.
 
 It is not a C derivative. It is not a safe language in the Rust sense. It is a high-trust language that gives you sharp tools and expects you to use them correctly.
+
+It's designed for power, terseness, and readability. It is a dense language with a low learning curve but high skill ceiling. You can write powerful and expressive programs without needing to know the guts of the language.
 
 ---
 
@@ -156,50 +156,53 @@ Bit 0 is always the most significant bit. Slices that cross struct field boundar
 Flux has a compile-time executor - the FVM - that runs Flux code at compile time. `emitflux` blocks inject real Flux definitions into the compilation unit, in order, from within comptime logic. This is how you generate code programmatically without a macro preprocessor.
 
 ```
-enum State { Idle, Running, Paused, Stopped };
-
 comptime
 {
-    int[] trans_from = [0, 1, 2, 1];
-    int[] trans_to   = [1, 2, 1, 3];
-    int   tcount     = 4;
-
-    emitflux
+    // .. some declarations omitted
+    while (i < NUM_OPS)
     {
-        def state_name(int s) -> byte*
-        {
-            if (s == 0) { return "Idle"; };
-            if (s == 1) { return "Running"; };
-            if (s == 2) { return "Paused"; };
-            if (s == 3) { return "Stopped"; };
-            return "Unknown";
-        };
-    };
-
-    for (int tidx = 0; tidx < tcount; tidx++)
-    {
+        nm   = op_names[i];
+        expr = op_exprs[i];
+        compiler.io.console.println(f"[comptime]   op_{nm}");
         emitflux
         {
-            def ~$i"can_trans_{}_{}":{trans_from[tidx];trans_to[tidx];}() -> bool { return true; };
+            def ~$i"op_{}":{nm} (int a, int b) -> int { return ~$expr; };
         };
+        i++;
+    };
+
+    compiler.io.console.println("[comptime] generating dispatch...");
+    emitflux { def dispatch(int id, int a, int b) -> int;  };
+    emitflux
+    {
+        def dispatch(int id, int a, int b) -> int
+        {
+            switch (id)
+            {
+    }#;
+
+    int j, jv;
+    while (j < NUM_OPS)
+    {
+        nm = op_names[j];
+        jv = j;
+        emitflux
+        {
+                case (~$f"{jv}") { return ~$i"op_{}":{nm;} (a, b); }
+        };
+        j++;
     };
 
     emitflux
     {
-        def transition(int fx, int to) -> int
-        {
-            if (fx == 0 & to == 1 & can_trans_0_1()) { return to; };
-            if (fx == 1 & to == 2 & can_trans_1_2()) { return to; };
-            if (fx == 2 & to == 1 & can_trans_2_1()) { return to; };
-            if (fx == 1 & to == 3 & can_trans_1_3()) { return to; };
-            println(f"Invalid: {fx}:{state_name(fx)} -> {to}:{state_name(to)}");
-            return fx;
-        };
+                default { return -1; };
+           #};
+       #};
     };
 };
 ```
 
-The comptime loop runs four times. Each iteration emits a `can_trans_X_Y()` function with a name built from the transition data using `~$` (codification) and i-strings. By the time `transition()` is emitted, all four predicates exist. Adding a new valid transition is one line in the data array.
+This comptime segment builds a function piece by piece. In the end, it constructs a switch statement and emits the cases into it with a loop. This whole function gets emitted back into the global scope of the program, fully parsed and part of the AST.
 
 You can also drop into raw FVM assembly inside a comptime block and modify comptime-scope variables directly:
 

@@ -5947,10 +5947,25 @@ class CodegenVisitor:
             elem_ptr = builder.gep(collection,
                                    [ir.Constant(ir.IntType(32), 0), current_idx],
                                    name='elem.ptr')
-            elem_val = builder.load(elem_ptr, name='elem')
-            var_ptr  = builder.alloca(elem_type, name=node.variables[0])
-            builder.store(elem_val, var_ptr)
-            module.symbol_table.define(node.variables[0], SymbolKind.VARIABLE, llvm_value=var_ptr)
+            if node.is_destructure and isinstance(elem_type, (ir.IdentifiedStructType, ir.LiteralStructType)):
+                # auto {x, y, ...} in arr -- bind each variable to a struct field by index
+                struct_name = elem_type.name if isinstance(elem_type, ir.IdentifiedStructType) else None
+                vtable = get_struct_vtable(module, struct_name) if struct_name else None
+                for i, var_name in enumerate(node.variables):
+                    fld_ptr = builder.gep(elem_ptr,
+                                          [ir.Constant(ir.IntType(32), 0),
+                                           ir.Constant(ir.IntType(32), i)],
+                                          name=f'{var_name}.ptr')
+                    fld_type = elem_type.elements[i]
+                    fld_alloca = builder.alloca(fld_type, name=var_name)
+                    fld_val = builder.load(fld_ptr, name=f'{var_name}.val')
+                    builder.store(fld_val, fld_alloca)
+                    module.symbol_table.define(var_name, SymbolKind.VARIABLE, llvm_value=fld_alloca)
+            else:
+                elem_val = builder.load(elem_ptr, name='elem')
+                var_ptr  = builder.alloca(elem_type, name=node.variables[0])
+                builder.store(elem_val, var_ptr)
+                module.symbol_table.define(node.variables[0], SymbolKind.VARIABLE, llvm_value=var_ptr)
 
         elif (isinstance(coll_type, ir.PointerType) and
               isinstance(coll_type.pointee, ir.PointerType)):
@@ -6586,6 +6601,20 @@ class CodegenVisitor:
                 ret_val.type.pointee == expected):
             ret_val = builder.load(ret_val, name="ret_load")
 
+        _dual_ret_struct_type = getattr(builder, '_flux_dual_return_type', None)
+        if isinstance(expected, ir.LiteralStructType) and _dual_ret_struct_type is not None:
+            # Wrap success value: { val, zeroinit(error_type), i1 0 }
+            success_llvm_type = expected.elements[0]
+            error_llvm_type   = expected.elements[1]
+            ret_val = CoercionContext.coerce_return_value(builder, ret_val, success_llvm_type)
+            zero_err = ir.Constant(error_llvm_type, None) if isinstance(error_llvm_type, (ir.IdentifiedStructType, ir.LiteralStructType)) else ir.Constant(error_llvm_type, 0)
+            undef_struct = ir.Constant(expected, None)
+            s0 = builder.insert_value(undef_struct, ret_val, 0, name='dr_succ')
+            s1 = builder.insert_value(s0, zero_err, 1, name='dr_err_zero')
+            s2 = builder.insert_value(s1, ir.Constant(ir.IntType(1), 0), 2, name='dr_flag')
+            builder.ret(s2)
+            return None
+
         ret_val = CoercionContext.coerce_return_value(builder, ret_val, expected)
 
         if getattr(builder, '_flux_is_recursive_func', False):
@@ -6596,6 +6625,94 @@ class CodegenVisitor:
             return None
 
         builder.ret(ret_val)
+        return None
+
+    def visit_ErrorReturnStatement(self, node, builder, module):
+        if builder.block.is_terminated:
+            return None
+        func = builder.block.function
+        if hasattr(func.type, 'return_type'):
+            expected = func.type.return_type
+        elif hasattr(func.type, 'pointee') and hasattr(func.type.pointee, 'return_type'):
+            expected = func.type.pointee.return_type
+        else:
+            raise FluxCodegenError("Cannot determine function return type for error return", node, module)
+        if not isinstance(expected, ir.LiteralStructType) or len(expected.elements) != 3:
+            raise FluxCodegenError(
+                "error return is only valid inside a dual-return function (def f() -> T ^| E)", node, module)
+        success_llvm_type = expected.elements[0]
+        error_llvm_type   = expected.elements[1]
+        if node.value is not None:
+            from fast import StructLiteral as _StructLiteral
+            if isinstance(node.value, _StructLiteral) and node.value.struct_type is None:
+                if isinstance(error_llvm_type, ir.IdentifiedStructType):
+                    node.value.struct_type = error_llvm_type.name
+            _suppress = isinstance(error_llvm_type, (ir.IdentifiedStructType, ir.LiteralStructType))
+            if _suppress:
+                self._in_member_access = True
+            try:
+                err_val = self.visit(node.value, builder, module)
+            finally:
+                if _suppress:
+                    self._in_member_access = False
+            if err_val is None:
+                err_val = ir.Constant(error_llvm_type, 0)
+            else:
+                err_val = CoercionContext.coerce_return_value(builder, err_val, error_llvm_type)
+        else:
+            err_val = ir.Constant(error_llvm_type, 0)
+        zero_succ = (ir.Constant(success_llvm_type, None)
+                     if isinstance(success_llvm_type, (ir.IdentifiedStructType, ir.LiteralStructType))
+                     else ir.Constant(success_llvm_type, 0))
+        undef_struct = ir.Constant(expected, None)
+        s0 = builder.insert_value(undef_struct, zero_succ, 0, name='dr_succ_zero')
+        s1 = builder.insert_value(s0, err_val, 1, name='dr_err')
+        s2 = builder.insert_value(s1, ir.Constant(ir.IntType(1), 1), 2, name='dr_flag')
+        if hasattr(builder, '_flux_defer_stack') and builder._flux_defer_stack:
+            for deferred in reversed(builder._flux_defer_stack):
+                if isinstance(deferred, list):
+                    for stmt in reversed(deferred):
+                        self.visit(stmt, builder, module)
+                else:
+                    self.visit(deferred, builder, module)
+        builder.ret(s2)
+        return None
+
+    def visit_DualAssignDeclaration(self, node, builder, module):
+        # Evaluate the call expression; the callee must return a LiteralStructType[3].
+        call_val = self.visit(node.call_expr, builder, module)
+        if call_val is None:
+            raise FluxCodegenError(
+                "Dual-assign call expression produced no value", node, module)
+        if (not isinstance(call_val.type, ir.LiteralStructType) or
+                len(call_val.type.elements) != 3):
+            raise FluxCodegenError(
+                "Dual-assign call expression must call a dual-return function (def f() -> T ^| E)",
+                node, module)
+        # Extract all three fields.
+        succ_val = builder.extract_value(call_val, 0, name=node.success_name + '_raw')
+        err_val  = builder.extract_value(call_val, 1, name=node.error_name  + '_raw')
+        # index 2 is the flag (i1): 0 = success, 1 = error; available if needed.
+        # Allocate and store success variable.
+        if node.success_name != '_':
+            success_llvm_type = FunctionTypeHandler.convert_type_spec_to_llvm(node.success_type, module)
+            succ_alloca = builder.alloca(success_llvm_type, name=node.success_name)
+            succ_alloca._flux_type_spec = node.success_type
+            coerced_succ = CoercionContext.coerce_return_value(builder, succ_val, success_llvm_type)
+            builder.store(coerced_succ, succ_alloca)
+            module.symbol_table.define(
+                node.success_name, SymbolKind.VARIABLE,
+                type_spec=node.success_type, llvm_value=succ_alloca)
+        # Allocate and store error variable.
+        if node.error_name != '_':
+            error_llvm_type = FunctionTypeHandler.convert_type_spec_to_llvm(node.error_type, module)
+            err_alloca = builder.alloca(error_llvm_type, name=node.error_name)
+            err_alloca._flux_type_spec = node.error_type
+            coerced_err = CoercionContext.coerce_return_value(builder, err_val, error_llvm_type)
+            builder.store(coerced_err, err_alloca)
+            module.symbol_table.define(
+                node.error_name, SymbolKind.VARIABLE,
+                type_spec=node.error_type, llvm_value=err_alloca)
         return None
 
     def visit_Case(self, node, builder, module):
@@ -6979,6 +7096,10 @@ class CodegenVisitor:
             node.name = self._resolve_stringify_name(node.name, builder, module, node)
 
         ret_type = FunctionTypeHandler.convert_type_spec_to_llvm(node.return_type, module)
+        _dual_error_llvm_type = None
+        if getattr(node, 'error_type', None) is not None:
+            _dual_error_llvm_type = FunctionTypeHandler.convert_type_spec_to_llvm(node.error_type, module)
+            ret_type = ir.LiteralStructType([ret_type, _dual_error_llvm_type, ir.IntType(1)])
 
         param_types = []
         param_metadata = FunctionTypeHandler.build_param_metadata(node.parameters, module)
@@ -7089,6 +7210,11 @@ class CodegenVisitor:
         module.symbol_table.enter_scope()
         if not hasattr(builder, 'initialized_unions'):
             builder.initialized_unions = set()
+        _prev_dual_return_type = getattr(builder, '_flux_dual_return_type', None)
+        if _dual_error_llvm_type is not None:
+            builder._flux_dual_return_type = ret_type
+        else:
+            builder._flux_dual_return_type = None
 
         for i, param in enumerate(func.args):
             param_name = node.parameters[i].name if node.parameters[i].name is not None else f"arg{i}"
@@ -7177,6 +7303,7 @@ class CodegenVisitor:
             module._current_namespace = _body_ns_orig_mod
             if hasattr(module, 'symbol_table'):
                 module.symbol_table.set_namespace(_body_ns_orig_st)
+            builder._flux_dual_return_type = _prev_dual_return_type
 
         if not builder.block.is_terminated:
             if isinstance(ret_type, ir.VoidType):
@@ -10105,6 +10232,65 @@ class CodegenVisitor:
                 if entry and entry[0]:
                     _source_file = entry[0]
                     break
+        # Register FXC comptime reflection struct layouts.
+        # These are defined in runtime.fx and must be known to the VM
+        # regardless of whether the user's module imports runtime.fx directly.
+        from fvm import StructLayout as _FXCSL
+        _fxc_typesys_fields = [
+            ('base_type',       TTag.BYTES,  0,  8),
+            ('custom_typename', TTag.BYTES,  8,  8),
+            ('is_signed',       TTag.BOOL,  16,  1),
+            ('is_const',        TTag.BOOL,  17,  1),
+            ('is_volatile',     TTag.BOOL,  18,  1),
+            ('is_tied',         TTag.BOOL,  19,  1),
+            ('is_pointer',      TTag.BOOL,  20,  1),
+            ('pointer_depth',   TTag.INT,   21,  4),
+            ('is_array',        TTag.BOOL,  25,  1),
+            ('array_size',      TTag.INT,   26,  4),
+            ('bit_width',       TTag.INT,   30,  4),
+            ('alignment',       TTag.INT,   34,  4),
+            ('endianness',      TTag.INT,   38,  4),
+            ('storage_class',   TTag.BYTES, 42,  8),
+            ('is_dict',         TTag.BOOL,  50,  1),
+            ('dict_key_type',   TTag.BYTES, 51,  8),
+            ('dict_value_type', TTag.BYTES, 59,  8),
+        ]
+        _fxc_symentry_fields = [
+            ('name', TTag.BYTES, 0, 8),
+            ('kind', TTag.BYTES, 8, 8),
+            ('type', TTag.STRUCT, 16, 67),
+            ('ns',   TTag.BYTES, 83, 8),
+        ]
+        _fxc_symtable_fields = [
+            ('entries', TTag.INT,    0, 4),
+            ('entry',   TTag.ARRAY,  4, 8),
+        ]
+        _fxc_param_fields = [
+            ('name', TTag.BYTES,  0, 8),
+            ('type', TTag.STRUCT, 8, 67),
+        ]
+        _fxc_funcinfo_fields = [
+            ('param_count',    TTag.INT,    0,  4),
+            ('params',         TTag.ARRAY,  4,  8),
+            ('return_type',    TTag.STRUCT, 12, 67),
+            ('calling_conv',   TTag.BYTES,  79, 8),
+            ('is_variadic',    TTag.BOOL,   87, 1),
+            ('is_recursive',   TTag.BOOL,   88, 1),
+            ('is_inline',      TTag.BOOL,   89, 1),
+            ('no_mangle',      TTag.BOOL,   90, 1),
+            ('has_effect',     TTag.BOOL,   91, 1),
+            ('has_attenuate',  TTag.BOOL,   92, 1),
+            ('pre_contracts',  TTag.INT,    93, 4),
+            ('post_contracts', TTag.INT,    97, 4),
+        ]
+        _fxc_reflection_layouts = {
+            'FXC_TYPESYS':  _FXCSL(name='FXC_TYPESYS',  fields=_fxc_typesys_fields,  total_size=67),
+            'FXC_SYMENTRY': _FXCSL(name='FXC_SYMENTRY', fields=_fxc_symentry_fields, total_size=91),
+            'FXC_SYMTABLE': _FXCSL(name='FXC_SYMTABLE', fields=_fxc_symtable_fields, total_size=12),
+            'FXC_PARAM':    _FXCSL(name='FXC_PARAM',    fields=_fxc_param_fields,    total_size=75),
+            'FXC_FUNCINFO': _FXCSL(name='FXC_FUNCINFO', fields=_fxc_funcinfo_fields, total_size=101),
+        }
+        struct_layouts.update(_fxc_reflection_layouts)
         if self._comptime_vm is None:
             self._comptime_vm = FluxVM(
                 struct_layouts={**struct_layouts, **cg._struct_layouts},
@@ -10113,6 +10299,7 @@ class CodegenVisitor:
             self._comptime_vm._codegen_class = FVMCodegen
             if hasattr(module, '_flux_compiler_macros'):
                 self._comptime_vm._compiler_constants = module._flux_compiler_macros
+                self._comptime_vm._compiler_symbol_table = module.symbol_table
         else:
             self._comptime_vm.struct_layouts.update({**struct_layouts, **cg._struct_layouts})
             if _source_file and not self._comptime_vm.source_file:

@@ -144,6 +144,11 @@ class Op(Enum):
     COMPILER_LOADLIB        = auto()   # compiler.fvm.loadlib(name, ext) - load a native library for asm symbol resolution
     COMPILER_IMPORT_LOCAL   = auto()   # compiler.import.local(path)
     COMPILER_FPM_PACKAGE    = auto()   # compiler.fpm.package(path)
+    COMPILER_SYMTABLE           = auto()   # compiler.symbol_table -> FXC_SYMTABLE (all entries)
+    COMPILER_SYMTABLE_FILTERED  = auto()   # compiler.symbol_table.<kind> -> FXC_SYMTABLE (filtered by kind string)
+    COMPILER_SYMTABLE_LOOKUP    = auto()   # compiler.symbol_table.lookup(name) -> FXC_SYMENTRY
+    COMPILER_SYMTABLE_FUNCINFO  = auto()   # compiler.symbol_table.funcinfo(name) -> FXC_FUNCINFO
+    COMPILER_TARGET_GET         = auto()   # compiler.target.<prop> -> value
     EXTERN_DECL             = auto()   # EXTERN_DECL <name> <ret_ttag> - register extern proto
 
     # String ops
@@ -673,6 +678,11 @@ class FluxVM:
         elif op == Op.COMPILER_LOADLIB:       self._op_compiler_loadlib()
         elif op == Op.COMPILER_IMPORT_LOCAL:  self._op_compiler_import_local()
         elif op == Op.COMPILER_FPM_PACKAGE:   self._op_compiler_fpm_package()
+        elif op == Op.COMPILER_SYMTABLE:          self._op_compiler_symtable(None)
+        elif op == Op.COMPILER_SYMTABLE_FILTERED: self._op_compiler_symtable(o[0])
+        elif op == Op.COMPILER_SYMTABLE_LOOKUP:   self._op_compiler_symtable_lookup(o[0])
+        elif op == Op.COMPILER_SYMTABLE_FUNCINFO: self._op_compiler_symtable_funcinfo(o[0])
+        elif op == Op.COMPILER_TARGET_GET:  self._op_compiler_target_get(o[0])
         elif op == Op.EXTERN_DECL:            self._extern_protos[o[0]] = o[1]
         elif op == Op.INLINE_ASM:            self._op_inline_asm(o[0], o[1], o[2], o[3], o[4])
 
@@ -1948,6 +1958,307 @@ class FluxVM:
                 fh.write(text)
         except OSError as e:
             raise VMError(f'compiler.fvm.dump: {e}')
+
+    def _op_compiler_symtable(self, kind_filter: Optional[str]):
+        """
+        Push a FXC_SYMTABLE struct onto the stack.
+        kind_filter: if given, only include entries whose 'kind' matches.
+        compiler.symbol_table         -> kind_filter=None  (all entries)
+        compiler.symbol_table.functions -> kind_filter='function'
+        etc.
+        """
+        st = getattr(self, '_compiler_symbol_table', None)
+        if st is None:
+            # No symbol table injected -- push empty FXC_SYMTABLE
+            self._push(Val(TTag.STRUCT, 'FXC_SYMTABLE', meta={'fields': {
+                'entries': Val(TTag.INT, 0),
+                'entry':   Val(TTag.ARRAY, 0, meta={'elem_type': 'FXC_SYMENTRY', 'count': 0, 'elem_size': 1, 'elements': []}),
+            }}))
+            return
+
+        _KIND_MAP = {
+            'functions':   'function',
+            'structs':     'struct',
+            'objects':     'object',
+            'traits':      'trait',
+            'interfaces':  'interface',
+            'namespaces':  'namespace',
+            'variables':   'variable',
+            'enums':       'enum',
+            'unions':      'union',
+            'effects':     'effect',
+            'constraints': 'constraint',
+            'contracts':   'contract',
+        }
+        resolved_kind = _KIND_MAP.get(kind_filter) if kind_filter else None
+
+        entries = []
+        # st may be the module symbol_table object; iterate its entries
+        # It exposes entries via _symbol_table dict: name -> SymbolEntry
+        sym_dict = getattr(st, '_symbol_table', {})
+        for sym_name, sym_entry in sym_dict.items():
+            kind = getattr(sym_entry, 'kind', '') or ''
+            if resolved_kind is not None and kind != resolved_kind:
+                continue
+            ns = getattr(sym_entry, 'namespace', '') or ''
+            # Build FXC_TYPESYS struct for this entry
+            type_info = getattr(sym_entry, 'type_system', None)
+            typesys_val = self._build_fxc_typesys(type_info)
+            entry_val = Val(TTag.STRUCT, 'FXC_SYMENTRY', meta={'fields': {
+                'name': Val(TTag.BYTES, sym_name.encode('utf-8')),
+                'kind': Val(TTag.BYTES, kind.encode('utf-8')),
+                'type': typesys_val,
+                'ns':   Val(TTag.BYTES, ns.encode('utf-8')),
+            }})
+            entries.append(entry_val)
+
+        entry_array = Val(TTag.ARRAY, len(entries), meta={
+            'elem_type': 'FXC_SYMENTRY',
+            'count': len(entries),
+            'elem_size': 1,
+            'elements': entries,
+        })
+        self._push(Val(TTag.STRUCT, 'FXC_SYMTABLE', meta={'fields': {
+            'entries': Val(TTag.INT, len(entries)),
+            'entry':   entry_array,
+        }}))
+
+    def _op_compiler_target_get(self, prop: str):
+        """Push the value of a compiler.target.<prop> property."""
+        import platform as _platform
+        import sys as _sys
+
+        # Derive values from _compiler_constants when available (injected from fmacros.py)
+        cc = self._compiler_constants
+
+        # Helper: parse triple stored in __TARGET_TRIPLE__ or detect from platform
+        triple = cc.get('__TARGET_TRIPLE__', '') or ''
+        if not triple:
+            sys_name = _platform.system()
+            if sys_name == 'Windows':
+                triple = 'x86_64-pc-windows-msvc'
+            elif sys_name == 'Darwin':
+                triple = 'arm64-apple-macosx11.0.0'
+            else:
+                triple = 'x86_64-pc-linux-gnu'
+
+        def _arch_from_triple(t: str) -> str:
+            t = t.lower()
+            if 'x86_64' in t or 'amd64' in t:
+                return 'x86_64'
+            if 'aarch64' in t or 'arm64' in t:
+                return 'arm64'
+            if 'i386' in t or 'i686' in t:
+                return 'x86'
+            if 'arm' in t:
+                return 'arm'
+            return t.split('-')[0]
+
+        def _os_from_triple(t: str) -> str:
+            t = t.lower()
+            if 'windows' in t or 'win32' in t:
+                return 'windows'
+            if 'darwin' in t or 'macos' in t or 'apple' in t:
+                return 'macos'
+            if 'linux' in t:
+                return 'linux'
+            if 'freestanding' in t or 'none' in t:
+                return 'freestanding'
+            return 'unknown'
+
+        def _abi_from_triple(t: str) -> str:
+            t = t.lower()
+            if 'msvc' in t:
+                return 'msvc'
+            if 'musl' in t:
+                return 'musl'
+            if 'gnu' in t:
+                return 'gnu'
+            return 'unknown'
+
+        arch = _arch_from_triple(triple)
+        is_x86 = arch in ('x86_64', 'x86')
+
+        # Detect CPU features via cpufeature if available, else assume false
+        def _has_feature(feat: str) -> bool:
+            if not is_x86:
+                return False
+            try:
+                import cpufeature
+                return bool(getattr(cpufeature, feat.upper(), False))
+            except ImportError:
+                pass
+            # Fallback: check compiler_constants for __HAVE_<FEAT>__
+            key = f'__HAVE_{feat.upper()}__'
+            return bool(int(cc.get(key, '0') or '0'))
+
+        _bool_props = {
+            'has_sse', 'has_sse2', 'has_sse4', 'has_avx',
+            'has_avx2', 'has_avx512', 'has_aes', 'has_popcnt', 'has_bmi2',
+        }
+
+        if prop in _bool_props:
+            feat = prop[len('has_'):]
+            self._push(Val(TTag.BOOL, int(_has_feature(feat))))
+            return
+
+        if prop == 'arch':
+            self._push(Val(TTag.BYTES, arch.encode('utf-8')))
+        elif prop == 'os':
+            self._push(Val(TTag.BYTES, _os_from_triple(triple).encode('utf-8')))
+        elif prop == 'abi':
+            self._push(Val(TTag.BYTES, _abi_from_triple(triple).encode('utf-8')))
+        elif prop == 'ptr_width':
+            pw = 64 if ('64' in arch or arch in ('x86_64', 'arm64', 'aarch64')) else 32
+            # Also check __SIZEOF_PTR__ from macros
+            try:
+                pw = int(cc.get('__SIZEOF_PTR__', str(pw // 8))) * 8
+            except (ValueError, TypeError):
+                pass
+            self._push(Val(TTag.INT, pw))
+        elif prop == 'endian':
+            # Flux spec: __BIG_ENDIAN__ in macros signals big-endian
+            big = bool(int(cc.get('__BIG_ENDIAN__', '0') or '0'))
+            self._push(Val(TTag.BYTES, b'big' if big else b'little'))
+        elif prop == 'cache_line':
+            self._push(Val(TTag.INT, 64))   # standard x86_64/arm64 cache line
+        elif prop == 'page_size':
+            try:
+                import mmap as _mmap
+                ps = _mmap.PAGESIZE
+            except Exception:
+                ps = 4096
+            self._push(Val(TTag.INT, ps))
+        else:
+            # Unknown property - push empty bytes rather than crashing
+            self._push(Val(TTag.BYTES, b''))
+
+    def _op_compiler_symtable_lookup(self, name: str):
+        """
+        compiler.symbol_table.lookup(name) -> FXC_SYMENTRY
+        Pops the name string from the stack if name is None, else uses the operand.
+        """
+        if name is None:
+            name_val = self._pop()
+            name = self._read_vm_string(name_val)
+        st = getattr(self, '_compiler_symbol_table', None)
+        sym_dict = getattr(st, '_symbol_table', {}) if st else {}
+        sym_entry = sym_dict.get(name)
+        if sym_entry is None:
+            # Return zero/empty FXC_SYMENTRY
+            self._push(Val(TTag.STRUCT, 'FXC_SYMENTRY', meta={'fields': {
+                'name': Val(TTag.BYTES, b''),
+                'kind': Val(TTag.BYTES, b''),
+                'type': self._build_fxc_typesys(None),
+                'ns':   Val(TTag.BYTES, b''),
+            }}))
+            return
+        kind = getattr(sym_entry, 'kind', '') or ''
+        ns   = getattr(sym_entry, 'namespace', '') or ''
+        type_info = getattr(sym_entry, 'type_system', None)
+        self._push(Val(TTag.STRUCT, 'FXC_SYMENTRY', meta={'fields': {
+            'name': Val(TTag.BYTES, name.encode('utf-8')),
+            'kind': Val(TTag.BYTES, kind.encode('utf-8')),
+            'type': self._build_fxc_typesys(type_info),
+            'ns':   Val(TTag.BYTES, ns.encode('utf-8')),
+        }}))
+
+    def _op_compiler_symtable_funcinfo(self, name: str):
+        """
+        compiler.symbol_table.funcinfo(name) -> FXC_FUNCINFO
+        """
+        if name is None:
+            name_val = self._pop()
+            name = self._read_vm_string(name_val)
+        st = getattr(self, '_compiler_symbol_table', None)
+        sym_dict = getattr(st, '_symbol_table', {}) if st else {}
+        sym_entry = sym_dict.get(name)
+        func_node = getattr(sym_entry, 'node', None) if sym_entry else None
+
+        param_entries = []
+        if func_node is not None:
+            for param in getattr(func_node, 'parameters', []):
+                ts = getattr(param, 'type_spec', None)
+                pname = getattr(param, 'name', '') or ''
+                param_val = Val(TTag.STRUCT, 'FXC_PARAM', meta={'fields': {
+                    'name': Val(TTag.BYTES, pname.encode('utf-8')),
+                    'type': self._build_fxc_typesys(ts),
+                }})
+                param_entries.append(param_val)
+
+        param_array = Val(TTag.ARRAY, len(param_entries), meta={
+            'elem_type': 'FXC_PARAM',
+            'count': len(param_entries),
+            'elem_size': 1,
+            'elements': param_entries,
+        })
+        ret_ts = getattr(func_node, 'return_type', None) if func_node else None
+        cc = getattr(func_node, 'calling_convention', '') or ''
+        self._push(Val(TTag.STRUCT, 'FXC_FUNCINFO', meta={'fields': {
+            'param_count':   Val(TTag.INT,  len(param_entries)),
+            'params':        param_array,
+            'return_type':   self._build_fxc_typesys(ret_ts),
+            'calling_conv':  Val(TTag.BYTES, cc.encode('utf-8')),
+            'is_variadic':   Val(TTag.BOOL, int(getattr(func_node, 'is_variadic', False) if func_node else False)),
+            'is_recursive':  Val(TTag.BOOL, int(getattr(func_node, 'is_recursive', False) if func_node else False)),
+            'is_inline':     Val(TTag.BOOL, int(getattr(func_node, 'is_inline', False) if func_node else False)),
+            'no_mangle':     Val(TTag.BOOL, int(getattr(func_node, 'no_mangle', False) if func_node else False)),
+            'has_effect':    Val(TTag.BOOL, int(getattr(func_node, 'has_effect', False) if func_node else False)),
+            'has_attenuate': Val(TTag.BOOL, int(getattr(func_node, 'has_attenuate', False) if func_node else False)),
+            'pre_contracts': Val(TTag.INT,  len(getattr(func_node, 'pre_contracts', []) if func_node else [])),
+            'post_contracts':Val(TTag.INT,  len(getattr(func_node, 'post_contracts', []) if func_node else [])),
+        }}))
+
+    def _build_fxc_typesys(self, ts) -> Val:
+        """Build a FXC_TYPESYS struct Val from a TypeSystem object (or None)."""
+        if ts is None:
+            return Val(TTag.STRUCT, 'FXC_TYPESYS', meta={'fields': {
+                'base_type':      Val(TTag.BYTES, b''),
+                'custom_typename':Val(TTag.BYTES, b''),
+                'is_signed':      Val(TTag.BOOL, 0),
+                'is_const':       Val(TTag.BOOL, 0),
+                'is_volatile':    Val(TTag.BOOL, 0),
+                'is_tied':        Val(TTag.BOOL, 0),
+                'is_pointer':     Val(TTag.BOOL, 0),
+                'pointer_depth':  Val(TTag.INT,  0),
+                'is_array':       Val(TTag.BOOL, 0),
+                'array_size':     Val(TTag.INT,  0),
+                'bit_width':      Val(TTag.INT,  0),
+                'alignment':      Val(TTag.INT,  0),
+                'endianness':     Val(TTag.INT,  0),
+                'storage_class':  Val(TTag.BYTES, b''),
+                'is_dict':        Val(TTag.BOOL, 0),
+                'dict_key_type':  Val(TTag.BYTES, b''),
+                'dict_value_type':Val(TTag.BYTES, b''),
+            }})
+        bt = getattr(ts, 'base_type', None)
+        bt_str = (str(bt.value) if hasattr(bt, 'value') else str(bt)) if bt is not None else ''
+        ctn = getattr(ts, 'custom_typename', '') or ''
+        sc  = getattr(ts, 'storage_class', None)
+        sc_str = (str(sc.value) if hasattr(sc, 'value') else str(sc)) if sc is not None else ''
+        arr_size = getattr(ts, 'array_size', 0) or 0
+        if hasattr(arr_size, 'value'):
+            try: arr_size = int(arr_size.value)
+            except Exception: arr_size = 0
+        return Val(TTag.STRUCT, 'FXC_TYPESYS', meta={'fields': {
+            'base_type':      Val(TTag.BYTES, bt_str.encode('utf-8')),
+            'custom_typename':Val(TTag.BYTES, ctn.encode('utf-8')),
+            'is_signed':      Val(TTag.BOOL, int(getattr(ts, 'is_signed',   False))),
+            'is_const':       Val(TTag.BOOL, int(getattr(ts, 'is_const',    False))),
+            'is_volatile':    Val(TTag.BOOL, int(getattr(ts, 'is_volatile', False))),
+            'is_tied':        Val(TTag.BOOL, int(getattr(ts, 'is_tied',     False))),
+            'is_pointer':     Val(TTag.BOOL, int(getattr(ts, 'is_pointer',  False))),
+            'pointer_depth':  Val(TTag.INT,  int(getattr(ts, 'pointer_depth', 0) or 0)),
+            'is_array':       Val(TTag.BOOL, int(getattr(ts, 'is_array',    False))),
+            'array_size':     Val(TTag.INT,  int(arr_size)),
+            'bit_width':      Val(TTag.INT,  int(getattr(ts, 'bit_width',   0) or 0)),
+            'alignment':      Val(TTag.INT,  int(getattr(ts, 'alignment',   0) or 0)),
+            'endianness':     Val(TTag.INT,  int(getattr(ts, 'endianness',  0) or 0)),
+            'storage_class':  Val(TTag.BYTES, sc_str.encode('utf-8')),
+            'is_dict':        Val(TTag.BOOL, int(getattr(ts, 'is_dict',         False))),
+            'dict_key_type':  Val(TTag.BYTES, (getattr(ts, 'dict_key_type',   '') or '').encode('utf-8')),
+            'dict_value_type':Val(TTag.BYTES, (getattr(ts, 'dict_value_type', '') or '').encode('utf-8')),
+        }})
 
     def _op_compiler_import_stdlib(self):
         path = self._read_vm_string(self._pop())

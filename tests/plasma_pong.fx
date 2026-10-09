@@ -825,6 +825,11 @@ def dispatch_project_div(double* u, double* v, double* p, double* div,
 
     for (t = 0; t < g_num_threads; t++)
     {
+        g_slices[t]
+        {
+            .phase = PHASE_PROJECT_DIV;
+
+        }
         g_slices[t].phase    = PHASE_PROJECT_DIV;
         g_slices[t].proj_u   = u;
         g_slices[t].proj_v   = v;
@@ -848,12 +853,15 @@ def dispatch_project_grad(double* u, double* v, double* p,
 
     for (t = 0; t < g_num_threads; t++)
     {
-        g_slices[t].phase       = PHASE_PROJECT_GRAD;
-        g_slices[t].proj_u      = u;
-        g_slices[t].proj_v      = v;
-        g_slices[t].proj_p      = p;
-        g_slices[t].proj_hx_inv = hx_inv;
-        g_slices[t].proj_hy_inv = hy_inv;
+        g_slices[t]
+        {
+            .phase       = PHASE_PROJECT_GRAD;
+            .proj_u      = u;
+            .proj_v      = v;
+            .proj_p      = p;
+            .proj_hx_inv = hx_inv;
+            .proj_hy_inv = hy_inv;
+        };
     };
     store_fence();
     for (t = 0; t < g_num_threads; t++) { semaphore_post(@g_work_sem); };
