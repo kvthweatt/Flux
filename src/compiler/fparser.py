@@ -1215,11 +1215,14 @@ class FluxParser:
 
             name([params]) -> type ;
             name([params]) -> type { body } ;
+            !!name([params]) -> type ;
 
-        Pattern: IDENTIFIER '(' ... ')' '->'
+        Pattern: (NO_MANGLE)? IDENTIFIER '(' ... ')' '->'
         The lookahead never consumes tokens.
         """
         with self._lookahead():
+            if self.expect(TokenType.NO_MANGLE):
+                self.advance()
             if not self.expect(TokenType.IDENTIFIER):
                 return False
             self.advance()
@@ -1288,7 +1291,7 @@ class FluxParser:
                 self.advance()
             
             is_asm = self.expect(TokenType.ASM)
-            is_func = self.expect(TokenType.DEF) or self.expect(TokenType.INLINE) or self.current_token.type in _CALLING_CONV_TOKENS or self._is_bare_function_def()
+            is_func = self.expect(TokenType.DEF) or self.expect(TokenType.INLINE) or self.expect(TokenType.NO_MANGLE) or self.current_token.type in _CALLING_CONV_TOKENS or self._is_bare_function_def()
             
             # Restore position
             self.position = saved_pos
@@ -1338,6 +1341,8 @@ class FluxParser:
         elif self.expect(TokenType.INLINE):
             return self.function_def()
         elif self.expect(TokenType.DEF):
+            return self.function_def()
+        elif self.expect(TokenType.NO_MANGLE):
             return self.function_def()
         elif self.current_token.type in _CALLING_CONV_TOKENS:
             return self.function_def()
@@ -4807,7 +4812,7 @@ class FluxParser:
                 else:
                     variables.append(var_decl)
                 self.consume(TokenType.SEMICOLON)
-            elif self.expect(TokenType.INLINE) or self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS or self._is_bare_function_def():
+            elif self.expect(TokenType.INLINE) or self.expect(TokenType.DEF) or self.expect(TokenType.NO_MANGLE) or self.current_token.type in _CALLING_CONV_TOKENS or self._is_bare_function_def():
                 if self.expect(TokenType.DEF) and self.peek().type == TokenType.FUNCTION_POINTER:
                     self.advance() #def
                     self.advance() #{}*

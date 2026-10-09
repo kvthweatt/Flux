@@ -81,7 +81,7 @@ struct ErrType
 
 f() -> int -> 42;
 
-kek(int x) -> int as operator [|][|] -> x < 0 ? -x : x;
+operator (int x) [|][|] -> int -> x < void ? -x : x;
 
 main() -> int : FSS_Protect_Frame
 {
